@@ -220,7 +220,7 @@ Dates are the day the experiment ran.
 
 | ID | Experiment | Question | Notes |
 |---|---|---|---|
-| E21 | Bollywood domain adaptation | All 394 labelled songs are US Billboard hits (1958–1991); no Bollywood | Unlabelled Bollywood audio (a few hundred songs) pseudo-labelled by the teacher, as in E17; measure on ~20 songs with Ultimate Guitar chord sheets (sequence agreement, untimed). First probe: *Raat Bhar* (Heropanti), detected key E major, I–V–vi–IV in E with C♯m7/Amaj7 colours (no ground truth) |
+| E21 | Bollywood domain adaptation | All 394 labelled songs are US Billboard hits (1958–1991); no Bollywood | Unlabelled Bollywood audio (a few hundred songs) pseudo-labelled by the teacher, as in E17; measure on ~20 songs with Ultimate Guitar chord sheets (sequence agreement, untimed). First probe: *Raat Bhar* (Heropanti) with v6 vs its UG sheet (E, B, C♯m, A, D): key **matches** (E major); 93% of time on the sheet's chords (extra: G♯m 6%); 88% of the sheet's 75 changes found in order; over-segmented 136 vs 75 changes, mostly A↔C♯m and C♯m↔B wavering. Use this scoring (key, time-in-sheet, sequence coverage) for the Bollywood test set |
 | later | Key-aware chord spelling | Names use one fixed spelling (A♭m instead of G♯m in E major) | Display only |
 | later | Learned beat head | Better beats for E16 (up to +2.7 pts on the sheet) | Multi-task beat output trained on Billboard bar timings |
 | later | Rare chord types (sus, dim, aug) | E18: under 0.5% of frames each, ≈0% recall | Synthetic renders of these qualities mixed into training, or more annotated data |
