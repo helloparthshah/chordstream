@@ -41,7 +41,20 @@ def _collate(batch):
     x = torch.from_numpy(np.stack([b[0] for b in batch]))
     y = torch.from_numpy(np.stack([b[1] for b in batch]))
     q = torch.from_numpy(np.stack([b[2] for b in batch]))
-    return x, y, q
+    aux = torch.from_numpy(np.stack([b[3] for b in batch]))
+    return x, y, q, aux
+
+
+def structured_loss(out: dict, aux: torch.Tensor) -> torch.Tensor:
+    """Root + bass cross-entropy and per-note binary cross-entropy (unknown targets skipped)."""
+    root, bass, notes = aux[..., 0], aux[..., 1], aux[..., 2]
+    loss = F.cross_entropy(out["root"].float().reshape(-1, 13), root.reshape(-1), ignore_index=IGNORE)
+    loss = loss + F.cross_entropy(out["bass"].float().reshape(-1, 13), bass.reshape(-1), ignore_index=IGNORE)
+    known = notes >= 0
+    if known.any():
+        bits = ((notes[known].unsqueeze(-1) >> torch.arange(12, device=notes.device)) & 1).float()
+        loss = loss + F.binary_cross_entropy_with_logits(out["notes"].float()[known], bits)
+    return loss
 
 
 @torch.no_grad()
@@ -57,7 +70,7 @@ def predict_song(net: ChordNet, feats: np.ndarray, device, chunk: int = 1024) ->
         chunk = max(chunk, 4 * ctx)
         x = torch.from_numpy(feats.astype(np.float32)).to(device)
         T = len(feats)
-        probs = np.zeros((T, N_CLASSES), np.float32)
+        probs = np.zeros((T, net.cfg.n_classes), np.float32)
         step = chunk - 2 * ctx
         for s in range(0, T, step):
             a, e = max(0, s - ctx), min(T, s + step + ctx)
@@ -67,7 +80,7 @@ def predict_song(net: ChordNet, feats: np.ndarray, device, chunk: int = 1024) ->
     chunk = max(chunk, 2 * ctx)
     x = torch.from_numpy(feats.astype(np.float32)).to(device)
     T = len(feats)
-    probs = np.zeros((T, N_CLASSES), np.float32)
+    probs = np.zeros((T, net.cfg.n_classes), np.float32)
     for s in range(0, T, chunk - ctx):
         a = max(0, s - ctx)
         e = min(T, a + chunk)
@@ -100,21 +113,22 @@ def evaluate(net: ChordNet, files, device, hmms: list[OnlineHMM] | None = None) 
 EMISSION_POWERS = (1.0, 2.0, 3.0)
 
 
-def fit_hmm(train_files, frontend: FrontendConfig, progressions_jsonl: str | None) -> list[OnlineHMM]:
+def fit_hmm(train_files, frontend: FrontendConfig, progressions_jsonl: str | None,
+            n_classes: int = N_CLASSES) -> list[OnlineHMM]:
     """Candidate HMMs (one per emission power); the best on validation is kept."""
-    counts = np.ones(N_CLASSES)
+    counts = np.ones(n_classes)
     seqs, durations = [], []
     for f in train_files:
         y = np.load(f)["labels"].astype(np.int64)
-        counts += np.bincount(y[y >= 0], minlength=N_CLASSES)
+        counts += np.bincount(y[y >= 0], minlength=n_classes)
         change_pts = np.flatnonzero(np.diff(y)) + 1
         runs = np.split(y, change_pts)
         seqs.append([int(r[0]) for r in runs])
         durations += [len(r) * frontend.frame_seconds for r in runs if r[0] > 0]
-    progs = load_progressions(progressions_jsonl) if progressions_jsonl else seqs
-    change = change_matrix_from_progressions(progs)
+    progs = load_progressions(progressions_jsonl) if progressions_jsonl and n_classes == N_CLASSES else seqs
+    change = change_matrix_from_progressions(progs, n_classes=n_classes)
     mean_dur = float(np.median(durations)) if durations else 2.0
-    A = build_transition(change, max(mean_dur, 0.5), frontend.frame_seconds)
+    A = build_transition(change, max(mean_dur, 0.5), frontend.frame_seconds, n_classes)
     # Uniform prior: the network already learned class frequencies; dividing them out again
     # over-boosts rare chords (measured on Billboard val: 72.9% -> 73.9%, half the flicker).
     del counts
@@ -141,6 +155,7 @@ def train(
     eval_every: int = 1,
     bidirectional: bool = False,
     distill_weight: float = 1.0,
+    aux_weight: float = 0.5,
 ) -> Path:
     if seed is not None:
         torch.manual_seed(seed)
@@ -151,6 +166,9 @@ def train(
 
     if init:
         bundle = BundleConfig.load(Path(init) / "config.json")
+        if model_cfg is not None:  # vocabulary/heads may change on top of an init; architecture may not
+            bundle.model.n_classes = model_cfg.n_classes
+            bundle.model.structured = model_cfg.structured
     else:
         bundle = BundleConfig(frontend_cfg or FrontendConfig(), model_cfg or ModelConfig())
     if bidirectional:  # offline teacher (weights from a causal init transfer: same shapes)
@@ -161,13 +179,23 @@ def train(
 
     train_files, val_files = split_files(cache, holdout_prefix=holdout_prefix)
     print(f"train songs: {len(train_files)}  val songs: {len(val_files)}  device: {dev}")
-    ds = CropDataset(train_files, crop, fcfg.bins_per_semitone, augment=True, crops_per_epoch=crops_per_epoch)
+    ds = CropDataset(train_files, crop, fcfg.bins_per_semitone, augment=True, crops_per_epoch=crops_per_epoch,
+                     n_classes=mcfg.n_classes)
     dl = DataLoader(ds, batch_size=batch_size, shuffle=True, num_workers=workers, collate_fn=_collate,
                     drop_last=True, persistent_workers=workers > 0)
 
     net = ChordNet(mcfg).to(dev)
     if init:
-        net.load_state_dict(torch.load(Path(init) / "model.pt", map_location=dev)["state_dict"])
+        sd = torch.load(Path(init) / "model.pt", map_location=dev)["state_dict"]
+        own = net.state_dict()
+        for k in ("head.weight", "head.bias"):  # e.g. 25-class init -> 109-class model: first rows coincide
+            if k in sd and sd[k].shape != own[k].shape:
+                grown = own[k].clone()
+                grown[: sd[k].shape[0]] = sd[k]
+                sd[k] = grown
+        missing, _ = net.load_state_dict(sd, strict=False)
+        if missing:
+            print(f"initialised fresh: {sorted({m.split('.')[0] for m in missing})}")
     print(f"params: {count_params(net) / 1e6:.2f}M")
     opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=0.02)
     total_steps = epochs * len(dl)
@@ -177,18 +205,21 @@ def train(
     use_amp = dev.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
-    hmms = fit_hmm(train_files, fcfg, progressions)
+    hmms = fit_hmm(train_files, fcfg, progressions, mcfg.n_classes)
     hmms[1].save(out_dir / "hmm.npz")
     best = -1.0
     for ep in range(1, epochs + 1):
         net.train()
         t0, tot, n = time.time(), 0.0, 0
-        for x, y, q in dl:
-            x, y, q = x.to(dev, non_blocking=True), y.to(dev, non_blocking=True), q.to(dev, non_blocking=True)
+        for x, y, q, aux in dl:
+            x, y, q, aux = (t.to(dev, non_blocking=True) for t in (x, y, q, aux))
             y[:, :WARMUP_CONTEXT] = IGNORE
+            aux[:, :WARMUP_CONTEXT, :2] = IGNORE
+            aux[:, :WARMUP_CONTEXT, 2] = -1
             with torch.autocast(dev.type, dtype=torch.float16, enabled=use_amp):
-                logits = net(x)
-            ce = F.cross_entropy(logits.float().reshape(-1, N_CLASSES), y.reshape(-1), ignore_index=IGNORE,
+                out = net.forward_all(x)
+            logits = out["chord"]
+            ce = F.cross_entropy(logits.float().reshape(-1, mcfg.n_classes), y.reshape(-1), ignore_index=IGNORE,
                                  label_smoothing=0.05, reduction="none")
             w = transition_weights(y, transition_weight, round(transition_window_s / fcfg.frame_seconds)).reshape(-1)
             w = w * (y.reshape(-1) != IGNORE)
@@ -201,6 +232,8 @@ def train(
                 logp = F.log_softmax(logits.float(), -1)
                 kl = (q * (torch.log(q.clamp_min(1e-8)) - logp)).sum(-1)
                 loss = loss + distill_weight * kl[has_q].mean()
+            if mcfg.structured and aux_weight > 0:
+                loss = loss + aux_weight * structured_loss(out, aux)
             opt.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
             scaler.unscale_(opt)

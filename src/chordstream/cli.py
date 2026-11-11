@@ -64,10 +64,14 @@ def cmd_train(a):
     from .config import ModelConfig
     from .train import train
 
-    mcfg = ModelConfig(context_frames=a.context, d_model=a.d_model, n_layers=a.layers)
+    from .vocab import N_CLASSES, N_EXT
+
+    ext = a.vocab == "extended"
+    mcfg = ModelConfig(context_frames=a.context, d_model=a.d_model, n_layers=a.layers,
+                       n_classes=N_EXT if ext else N_CLASSES, structured=ext or a.structured)
     train(a.cache, a.out, a.epochs, a.batch_size, a.lr, a.crops, a.init, a.progressions, a.holdout_prefix,
           a.workers, a.device, mcfg, a.transition_weight, a.transition_window, a.seed, FrontendConfig(gamma=a.gamma),
-          a.eval_every, a.bidirectional, a.distill_weight)
+          a.eval_every, a.bidirectional, a.distill_weight, a.aux_weight)
 
 
 def cmd_export(a):
@@ -280,6 +284,10 @@ def main(argv=None):
     s.add_argument("--eval-every", type=int, default=1, help="score held-out songs every N epochs (and the last)")
     s.add_argument("--bidirectional", action="store_true", help="train an offline teacher (sees future audio)")
     s.add_argument("--distill-weight", type=float, default=1.0, help="weight of the teacher-posterior loss")
+    s.add_argument("--vocab", choices=["majmin", "extended"], default="majmin",
+                   help="extended = 109 classes (maj min 7 maj7 m7 dim aug sus2 sus4) + structured heads")
+    s.add_argument("--structured", action="store_true", help="add root/bass/notes heads (implied by extended)")
+    s.add_argument("--aux-weight", type=float, default=0.5, help="weight of the structured-head losses")
     s.add_argument("--gamma", type=float, default=FrontendConfig.gamma, help="frontend gamma (fresh models only; "
                    "must match the --gamma the cache was built with)")
     s.set_defaults(fn=cmd_train)

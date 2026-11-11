@@ -42,6 +42,9 @@ class ModelConfig:
     # Offline teacher only: attend +-context_frames and use centred convolutions. Never
     # exported for streaming (it needs future audio); used to pseudo-label for distillation.
     bidirectional: bool = False
+    # Extra training-only heads (McFee & Bello-style structured outputs): root, bass, 12 notes.
+    # They let rare/out-of-vocabulary chords still teach the shared layers. Not exported.
+    structured: bool = False
 
 
 @dataclass

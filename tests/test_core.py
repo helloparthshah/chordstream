@@ -246,5 +246,70 @@ def test_soft_targets_follow_pitch_shift(tmp_path):
     np.savez(tmp_path / "s.npz", feats=np.random.rand(T, 144).astype(np.float16), labels=labels, soft=soft)
     ds = CropDataset([tmp_path / "s.npz"], 256, 2, augment=True, crops_per_epoch=20)
     for i in range(20):
-        x, y, q = ds[i]
+        x, y, q, aux = ds[i]
         assert (q.argmax(1)[y >= 0] == y[y >= 0]).all()  # soft mass moves with the label
+
+
+def test_extended_vocab_is_superset_of_majmin():
+    from chordstream.vocab import CLASS_NAMES, N_EXT, ext_index, pretty_name, to_majmin, transpose
+
+    assert N_EXT == 109 and CLASS_NAMES[1] == "C:maj" and CLASS_NAMES[13] == "C:min"
+    assert CLASS_NAMES[ext_index(7, 2)] == "G:7" and pretty_name(ext_index(9, 4)) == "Am7"
+    assert transpose(ext_index(2, 8), 5) == ext_index(7, 8)  # Dsus4 + 5 = Gsus4
+    assert to_majmin(ext_index(7, 2)) == ext_index(7, 0)  # G7 -> G
+    assert to_majmin(ext_index(2, 8)) == -1  # sus has no majmin triad
+
+
+@pytest.mark.parametrize("label,cls,root,bass,notes", [
+    ("C:maj", "C:maj", 0, 0, {0, 4, 7}),
+    ("A:min7", "A:min7", 9, 9, {9, 0, 4, 7}),
+    ("G:7/3", "G:7", 7, 11, {7, 11, 2, 5}),
+    ("D:sus4(b7)", "D:sus4", 2, 2, {2, 7, 9, 0}),
+    ("B:hdim7", "B:dim", 11, 11, {11, 2, 5, 9}),
+    ("F:maj(9)", "F:maj", 5, 5, {5, 9, 0, 7}),
+    ("E:9", "E:7", 4, 4, {4, 8, 11, 2, 6}),
+    ("C:(1,b3,5)", "C:min", 0, 0, {0, 3, 7}),
+    ("A:5", None, 9, 9, {9, 4}),  # power chord: no class, but root/notes still known
+    ("C:maj/5", "C:maj", 0, 7, {0, 4, 7}),
+])
+def test_parse_harte_ext(label, cls, root, bass, notes):
+    from chordstream.vocab import CLASS_NAMES, IGNORE, parse_harte_ext
+
+    c, r, b, m = parse_harte_ext(label)
+    assert (CLASS_NAMES[c] if c != IGNORE else None) == cls
+    assert (r, b) == (root, bass)
+    assert {k for k in range(12) if m >> k & 1} == notes
+
+
+def test_extended_training_step_runs_and_grows_head(tmp_path):
+    """One tiny training run on extended labels: structured losses, 25->109 head init."""
+    torch = pytest.importorskip("torch")
+    from chordstream.config import BundleConfig, FrontendConfig, ModelConfig
+    from chordstream.model import ChordNet
+    from chordstream.train import train
+    from chordstream.vocab import N_EXT, ext_index
+
+    small = ModelConfig(d_model=32, n_layers=1, context_frames=16)
+    init = tmp_path / "init"
+    init.mkdir()
+    BundleConfig(FrontendConfig(), small).save(init / "config.json")
+    torch.manual_seed(0)
+    base = ChordNet(small)
+    torch.save({"state_dict": base.state_dict()}, init / "model.pt")
+
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    rng = np.random.default_rng(0)
+    for i in range(3):
+        T = 120
+        lab = np.full(T, ext_index(7, 2), np.int16)  # G7
+        np.savez(cache / f"song__{i:04d}.npz", feats=rng.random((T, 144)).astype(np.float16), labels=lab,
+                 root=np.full(T, 7, np.int16), bass=np.full(T, 11, np.int16),
+                 notes=np.full(T, (1 << 7) | (1 << 11) | (1 << 2) | (1 << 5), np.int32))
+    out = train(str(cache), str(tmp_path / "out"), epochs=1, batch_size=2, crops_per_epoch=4, init=str(init),
+                workers=0, device="cpu", model_cfg=ModelConfig(n_classes=N_EXT, structured=True))
+    cfg = BundleConfig.load(out / "config.json")
+    assert cfg.model.n_classes == N_EXT and cfg.model.structured and cfg.model.d_model == 32
+    sd = torch.load(out / "model.pt")["state_dict"] if (out / "model.pt").exists() else None
+    if sd is not None:
+        assert sd["head.weight"].shape[0] == N_EXT and "notes_head.weight" in sd

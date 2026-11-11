@@ -114,6 +114,10 @@ class ChordNet(nn.Module):
         self.blocks = nn.ModuleList(Block(cfg) for _ in range(cfg.n_layers))
         self.ln_f = nn.LayerNorm(cfg.d_model)
         self.head = nn.Linear(cfg.d_model, cfg.n_classes)
+        if cfg.structured:
+            self.root_head = nn.Linear(cfg.d_model, 13)  # 12 pitch classes + "no chord"
+            self.bass_head = nn.Linear(cfg.d_model, 13)
+            self.notes_head = nn.Linear(cfg.d_model, 12)  # which pitch classes sound (multi-label)
         self.register_buffer("slopes", alibi_slopes(cfg.n_heads), persistent=False)
 
     def attn_bias(self, T: int, device) -> torch.Tensor:
@@ -131,12 +135,23 @@ class ChordNet(nn.Module):
         h = self.cnn(x[:, None])  # (B, C, T, F')
         return self.proj(h.permute(0, 2, 1, 3).reshape(B, T, -1))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def features(self, x: torch.Tensor) -> torch.Tensor:
         h = self.embed(x)
         bias = self.attn_bias(x.shape[1], x.device)
         for blk in self.blocks:
             h = blk(h, bias)
-        return self.head(self.ln_f(h))
+        return self.ln_f(h)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.head(self.features(x))
+
+    def forward_all(self, x: torch.Tensor) -> dict:
+        """Chord logits plus the structured heads (training only)."""
+        h = self.features(x)
+        out = {"chord": self.head(h)}
+        if self.cfg.structured:
+            out.update(root=self.root_head(h), bass=self.bass_head(h), notes=self.notes_head(h))
+        return out
 
     def cache_shape(self, batch: int = 1) -> tuple[int, ...]:
         c = self.cfg

@@ -23,7 +23,7 @@ from .beat import BeatTracker, change_scale
 from .config import FrontendConfig
 from .data.billboard import salami_beats
 from .hmm import OnlineHMM
-from .vocab import IGNORE
+from .vocab import IGNORE, N_EXT, to_majmin
 
 FS = FrontendConfig().frame_seconds
 
@@ -64,7 +64,19 @@ def song_inputs(cache_file: Path, net, device, raw: Path, offsets: dict) -> dict
             "beats": BeatTracker().run(feats), "ref_beats": ref_beats}
 
 
-def score(songs: list[dict], hmm: OnlineHMM, beat_cfg: dict | None, tol: float = 0.25) -> dict:
+_MM = np.array([to_majmin(c) for c in range(N_EXT)])
+
+
+def majmin_view(path: np.ndarray, labels: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Reduce extended predictions/labels to majmin (MIREX): labels without a maj/min triad are
+    ignored; predictions without one (sus, dim, aug) can never match."""
+    lab = np.where(labels >= 0, _MM[np.clip(labels, 0, None)], IGNORE)
+    pred = _MM[path]
+    pred = np.where(pred == IGNORE, -2, pred)
+    return pred, lab
+
+
+def score(songs: list[dict], hmm: OnlineHMM, beat_cfg: dict | None, tol: float = 0.25, majmin: bool = False) -> dict:
     correct = total = n_pred = n_ref = 0
     fs, devs, signed = [], [], []
     for s in songs:
@@ -73,6 +85,8 @@ def score(songs: list[dict], hmm: OnlineHMM, beat_cfg: dict | None, tol: float =
             scales = np.array([change_scale(b, **beat_cfg) for b in s["beats"]])
         path = hmm.filter(s["probs"], scales)
         y = s["labels"]
+        if majmin:
+            path, y = majmin_view(path, y)
         valid = y != IGNORE
         correct += int((path[valid] == y[valid]).sum())
         total += int(valid.sum())

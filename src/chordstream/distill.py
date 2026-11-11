@@ -43,7 +43,8 @@ def pseudo_label(teacher: str, labelled: str, out: str, unlabelled_audio: list[s
     for f in sorted(Path(labelled).glob("*.npz")):
         d = np.load(f)
         soft = predict_song(net, d["feats"], dev)
-        np.savez_compressed(out_dir / f.name, feats=d["feats"], labels=d["labels"], soft=soft.astype(np.float16))
+        extra = {k: d[k] for k in ("root", "bass", "notes", "labels_mm") if k in d.files}  # structured targets
+        np.savez_compressed(out_dir / f.name, feats=d["feats"], labels=d["labels"], soft=soft.astype(np.float16), **extra)
         known.add(f.stem.split("__")[-1])
         stats["labelled"] += 1
 

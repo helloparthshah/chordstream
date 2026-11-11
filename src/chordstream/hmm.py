@@ -17,13 +17,14 @@ import numpy as np
 from .vocab import IGNORE, N_CLASSES, NO_CHORD, transpose
 
 
-def change_matrix_from_progressions(progressions: Iterable[list[int]], smoothing: float = 1.0) -> np.ndarray:
+def change_matrix_from_progressions(progressions: Iterable[list[int]], smoothing: float = 1.0,
+                                    n_classes: int = N_CLASSES) -> np.ndarray:
     """Key-invariant chord-change probabilities (diagonal = 0), rows sum to 1.
 
     Every bigram is counted in all 12 transpositions, which is exactly the
     "transpose everything into all 12 keys" augmentation, done analytically.
     """
-    counts = np.full((N_CLASSES, N_CLASSES), smoothing, dtype=np.float64)
+    counts = np.full((n_classes, n_classes), smoothing, dtype=np.float64)
     for prog in progressions:
         seq = [c for c in prog if c != IGNORE]
         for a, b in zip(seq, seq[1:]):
@@ -35,29 +36,31 @@ def change_matrix_from_progressions(progressions: Iterable[list[int]], smoothing
     return counts / counts.sum(axis=1, keepdims=True)
 
 
-def build_transition(change: np.ndarray | None, mean_chord_seconds: float, frame_seconds: float) -> np.ndarray:
+def build_transition(change: np.ndarray | None, mean_chord_seconds: float, frame_seconds: float,
+                     n_classes: int = N_CLASSES) -> np.ndarray:
     if change is None:
-        change = np.ones((N_CLASSES, N_CLASSES))
+        change = np.ones((n_classes, n_classes))
         np.fill_diagonal(change, 0.0)
         change /= change.sum(axis=1, keepdims=True)
     p_stay = 1.0 - frame_seconds / mean_chord_seconds
-    return p_stay * np.eye(N_CLASSES) + (1.0 - p_stay) * change
+    return p_stay * np.eye(len(change)) + (1.0 - p_stay) * change
 
 
 class OnlineHMM:
     def __init__(self, A: np.ndarray, class_prior: np.ndarray | None = None, emission_power: float = 1.0):
         self.A = A.astype(np.float64)
-        self.prior = np.ones(N_CLASSES) / N_CLASSES if class_prior is None else class_prior.astype(np.float64)
+        self.n = len(self.A)
+        self.prior = np.ones(self.n) / self.n if class_prior is None else class_prior.astype(np.float64)
         self.power = emission_power
         # Decompose A = p_stay*I + (1-p_stay)*C so the change rate can be modulated per frame.
         self.p_stay = float(np.mean(np.diag(self.A)))
-        C = self.A - self.p_stay * np.eye(N_CLASSES)
+        C = self.A - self.p_stay * np.eye(self.n)
         np.fill_diagonal(C, 0.0)
         self.C = C / np.maximum(C.sum(1, keepdims=True), 1e-12)
         self.reset()
 
     def reset(self) -> None:
-        self.alpha = np.zeros(N_CLASSES)
+        self.alpha = np.zeros(self.n)
         self.alpha[NO_CHORD] = 1.0
 
     def step(self, probs: np.ndarray, change_scale: float = 1.0, chord_prior: np.ndarray | None = None) -> tuple[int, float]:
