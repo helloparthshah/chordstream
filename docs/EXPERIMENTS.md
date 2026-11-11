@@ -294,6 +294,30 @@ Dates are the day the experiment ran.
   the decoder, and E23b beats the offline teacher's accuracy with 240 ms of delay. Flutter is
   reduced (2.01× → 1.44×) but not gone. Next: the same on the extended vocabulary (E25).
 
+### F02 · Speculative display: zero-delay draft + label-delay verifier · 2026-11-12
+- **Question (user idea, after LLM speculative decoding):** can a zero-delay draft be shown at once
+  and a label-delay model verify/correct it, giving instant changes with the delayed model's stability?
+- **Script:** [`experiments/analysis_speculative.py`](../experiments/analysis_speculative.py). Draft
+  `v4_clean`, verifier E23a / E23b. Displayed sequence scored against labels at display time.
+- **Accept rules and results (36 clean held-out):**
+
+  | live display | acc at display | changes | change-F |
+  |---|---|---|---|
+  | draft only (zero delay) | 80.6% | 2.01× | 0.564 |
+  | draft if HMM confidence ≥ τ, else verifier (τ 0.5–0.99) | 80.6% | 2.0–2.07× | ≤ 0.565 |
+  | draft once held k frames, else verifier (E23b, k 2–6) | 79.8–77.0% | 2.06–1.63× | 0.54–0.47 |
+  | draft if network prob ≥ 0.9, else verifier (E23a) | 80.2% | 1.70× | 0.591 |
+  | **E23a alone, 120 ms late** | 80.0% | **1.68×** | **0.591** |
+  | E23b alone, 240 ms late | 77.1% | 1.44× | 0.462 |
+
+  The HMM posterior is > 0.99 almost everywhere, flips included, so confidence gating accepts nearly
+  every draft; network confidence helps only marginally.
+- **Conclusion:** per-frame draft/verify doesn't pay: the draft's flips are confident errors (as in
+  F01), so no accept rule separates them. Showing the 120 ms model directly is as good. The idea does
+  fit the **chord sheet**, which is already one beat (~500 ms) late: a longer-delay "verifier" there
+  costs no extra visible latency. → E26 (one network, two delay heads: short for the live readout,
+  long for the sheet).
+
 ### E24 · Extended vocabulary without distillation · 2026-11-12 — queued (runs after E23)
 - **Setup:** E18's data and heads (`data/cache_ext`, `--vocab extended`) with E15's recipe, human labels
   only. Compared with v6 (the distilled extended model) in both majmin and full-vocabulary views.
@@ -318,6 +342,7 @@ Dates are the day the experiment ran.
 | ID | Experiment | Question | Notes |
 |---|---|---|---|
 | E25 | Extended vocabulary + label delay 3 / 6 (`experiments/2026-11-12_ext_delay.ps1`) | Do E23's gains carry over to the 109-class model? | Running. Baseline E24 and E24 + fixed-lag at equal delay. Deployment candidate (human labels only) |
+| E26 | Two delay heads in one network: ~3 frames (live readout) + ~12 frames ≈ one beat (sheet) | Does a beat-length delay push the sheet past 84%, at no extra compute? | From F02. Same trunk, two chord heads; the sheet's per-beat pooling uses the long head |
 | E21 | Bollywood domain adaptation | All 394 labelled songs are US Billboard hits (1958–1991); no Bollywood | Human labels only (no-distillation policy): UG chord sheets anchored to timed lyrics (LRCLIB + Whisper) as approximately timed labels for sung sections, for both training and a timed test set; untimed sheet comparison as a fallback. First probe: *Raat Bhar* (Heropanti) with v6 vs its UG sheet (E, B, C♯m, A, D): key **matches** (E major); 93% of time on the sheet's chords (extra: G♯m 6%); 88% of the sheet's 75 changes found in order; over-segmented 136 vs 75 changes, mostly A↔C♯m and C♯m↔B wavering. Use this scoring (key, time-in-sheet, sequence coverage) for the Bollywood test set. **Timed labels idea:** UG sheets put chords over words and LRCLIB + Whisper time the words, so sheet + lyrics give approximately timed human chord labels for sung sections; use them as a timed test set and to check/correct teacher pseudo-labels. Note: training-label sync is checked against audio (fetch-time alignment, E14 audit), never lyrics; pseudo-labels are aligned by construction |
 | later | Seed repeats for v4 vs v5 | Is the distillation gain robust to training randomness? | Retrain both with a second seed (~40 min) |
 | later | Key-aware chord spelling | Names use one fixed spelling (A♭m instead of G♯m in E major) | Display only |
