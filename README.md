@@ -137,8 +137,10 @@ Follow-up sweeps on 291 songs, compared on the same 25–37 held-out songs:
 - **Faster frontend** (`--gamma 10`, low-frequency windows 0.2 s → 0.08 s): 1 point *less*
   accurate (77.9% vs 78.8%), with lower change-F (0.499 vs 0.520) and no lag gain. Rejected,
   because blurred bass costs more than the shorter window saves.
-- **Data scaling:** going from 207 to 291 songs added only about +0.5 points, so the current
-  model and frontend are close to saturating on this data.
+- **Data scaling:** 207 → 394 songs (v3) is a tie with v2 (78.3% vs 78.4% on 37 held-out songs).
+  v3 also scores only 79% on its *own training songs*, so the model under-fits rather than
+  over-fits. More of the same data can't help; capacity, label noise and the causal limit
+  are the candidates.
 
 Error analysis:
 - **Late switches:** 46% of errors are the previous chord still showing after a true change.
