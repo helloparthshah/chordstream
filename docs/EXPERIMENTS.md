@@ -173,6 +173,10 @@ Dates are the day the experiment ran.
   lookahead is about 2 pts plus segmentation quality). Student 81.3% raw / **80.8%** (HMM 3 s /
   power 2), 1.60× changes; original 10: 78.9%. 2 ms/frame.
 - **Decision:** deployed **v5** and published it as release `model-v5`.
+- **Significance check (paired, per song, v4 vs v5 on the same 36 songs):** raw +0.9 pt, 95% CI
+  [+0.4, +1.4] (song bootstrap), better on 24 / worse on 9 songs, sign test p = 0.014. Smoothed
+  (as deployed) +0.7 pt, CI [+0.1, +1.4], 23 / 11, p = 0.058. Real but small; the student recovers
+  about a third of the teacher's lead. One seed per model, so seed variance isn't included.
 
 ### E18 · Extended vocabulary + structured heads · 2026-11-12 — `models/ext_teacher`, `models/ext_student` → `v6`
 - **Script:** [`experiments/2026-11-12_extended_vocab.ps1`](../experiments/2026-11-12_extended_vocab.ps1)
@@ -221,6 +225,7 @@ Dates are the day the experiment ran.
 | ID | Experiment | Question | Notes |
 |---|---|---|---|
 | E21 | Bollywood domain adaptation | All 394 labelled songs are US Billboard hits (1958–1991); no Bollywood | Unlabelled Bollywood audio (a few hundred songs) pseudo-labelled by the teacher, as in E17; measure on ~20 songs with Ultimate Guitar chord sheets (sequence agreement, untimed). First probe: *Raat Bhar* (Heropanti) with v6 vs its UG sheet (E, B, C♯m, A, D): key **matches** (E major); 93% of time on the sheet's chords (extra: G♯m 6%); 88% of the sheet's 75 changes found in order; over-segmented 136 vs 75 changes, mostly A↔C♯m and C♯m↔B wavering. Use this scoring (key, time-in-sheet, sequence coverage) for the Bollywood test set. **Timed labels idea:** UG sheets put chords over words and LRCLIB + Whisper time the words, so sheet + lyrics give approximately timed human chord labels for sung sections; use them as a timed test set and to check/correct teacher pseudo-labels. Note: training-label sync is checked against audio (fetch-time alignment, E14 audit), never lyrics; pseudo-labels are aligned by construction |
+| later | Seed repeats for v4 vs v5 | Is the distillation gain robust to training randomness? | Retrain both with a second seed (~40 min) |
 | later | Key-aware chord spelling | Names use one fixed spelling (A♭m instead of G♯m in E major) | Display only |
 | later | Learned beat head | Better beats for E16 (up to +2.7 pts on the sheet) | Multi-task beat output trained on Billboard bar timings |
 | later | Rare chord types (sus, dim, aug) | E18: under 0.5% of frames each, ≈0% recall | Synthetic renders of these qualities mixed into training, or more annotated data |
