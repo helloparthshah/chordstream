@@ -124,57 +124,17 @@ and a GPU recommended.
 - **Script:** this works in any script Whisper writes in. Romanized lyrics of non-English
   songs match poorly, because Whisper writes Hindi in Devanagari.
 
-## Results and experiments
+## Results
 
-Measured on 10 held-out Billboard songs (`chordstream.evaluate`), streaming-exact:
+The live model is **v5**: 80.8% frame accuracy (majmin) on 36 clean held-out Billboard songs and
+78.9% on the original 10 (from 73.8% for the first fine-tuned model), at about 2 ms of CPU per
+40 ms frame with zero lookahead. Every experiment, including the ones that didn't help, is in
+**[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)**, with commands and decisions. The batch scripts
+are in [`experiments/`](experiments/).
 
-| Setup | Frame acc | Changes vs ref |
-|---|---|---|
-| Synthetic-only model | 46% | – |
-| Fine-tuned on 76 real songs, raw | 74.3% | 4.2× |
-| + causal HMM (uniform prior, default) | 73.9% | 1.9–2.0× |
-| + beat-aware HMM (`beat.py`), even with *oracle* beats | 73.8% | 1.83× |
-| + causal key prior (`key.py`) | ≤ 73.8% | 1.8–1.9× |
-| **v2:** 207 real songs, transition-weighted loss (×3, 0.5 s), HMM power 1.5 | **75.5%** (77.0% on all 19 held-out) | 1.9× |
-| **v4:** 367 cleaned songs, lr 3e-4 × 80 epochs, HMM 5 s / power 1.5 | **78.8%** (80.1% on 36 clean held-out) | 1.6× |
-| **v5:** v4 recipe + distillation from a bidirectional teacher (+299 unlabelled songs), HMM 3 s / power 2 | **78.9%** (80.8% on 36 clean held-out) | 1.6× |
-| *Teacher (bidirectional, sees ±5 s, offline only)* | *82.0%* (82.9%) | *1.04×* |
+## Using it from other devices on your LAN
 
-v2 also improved change timing: change-point F rose from 0.433 to 0.503 and median switching
-lag fell from +120 to +80 ms on all held-out songs. More data alone (207 songs, plain loss)
-reaches the same accuracy but keeps the +120 ms lag. Reproduce with
-`chordstream train --transition-weight 3` and `chordstream evaluate models/<bundle>`.
-
-Follow-up sweeps on 291 songs, compared on the same 25–37 held-out songs:
-- **Transition weight:** 2 and 3 are within noise of each other (80.4% vs 80.1%), and 5 is
-  slightly worse. Weight 3 gives the lowest lag (+40 ms).
-- **Faster frontend** (`--gamma 10`, low-frequency windows 0.2 s → 0.08 s): 1 point *less*
-  accurate (77.9% vs 78.8%), with lower change-F (0.499 vs 0.520) and no lag gain. Rejected,
-  because blurred bass costs more than the shorter window saves.
-- **Training budget:** the earlier models were under-trained. lr 3e-4 for 80 epochs (v4) gave
-  +2.4 points over v3, with change-F 0.606 and +40–80 ms lag. Re-timing drifting labels and
-  dropping 27 unfixable songs made no difference to the trained model (80.6% either way), though
-  it does make the evaluation more trustworthy.
-- **Cost of zero lookahead:** the bidirectional teacher scores 82.9% vs 80.1–80.8% causal, and its
-  segmentation is nearly exact (1.04× changes, change-F 0.71 vs 0.60). Distilling it into the causal
-  model (`chordstream pseudo-label` + `train --distill-weight`) recovers about +0.7 points.
-- **Data scaling:** 207 → 394 songs (v3) is a tie with v2 (78.3% vs 78.4% on 37 held-out songs).
-  v3 also scores only 79% on its *own training songs*, so the model under-fits rather than
-  over-fits. More of the same data can't help; capacity, label noise and the causal limit
-  are the candidates.
-
-Error analysis:
-- **Late switches:** 46% of errors are the previous chord still showing after a true change.
-- **Near changes:** 43% of errors fall within 0.4 s of a change.
-- **Lag:** median switching lag is +40 ms for the raw network and +120 ms after the HMM.
-
-So the remaining accuracy is limited by how quickly the causal model commits to a new chord,
-not by beat or key knowledge. `beat.py` and `key.py` are kept as evaluated experiments but
-are not wired into the engine. The causal beat tracker currently scores beat F≈0.27 (tempo is
-right on 6/10 songs, with half-tempo or off-beat locking on the rest). The next levers are
-more real training data and transition-focused training.
-
-**Using it from other devices on your LAN:** browsers only allow microphone access on
+Browsers only allow microphone access on
 HTTPS pages or localhost, so serve HTTPS with a self-signed certificate:
 
 ```powershell
@@ -185,6 +145,9 @@ uv run chordstream serve --host 0.0.0.0 --ssl-certfile data/certs/cert.pem --ssl
 
 Open `https://<your LAN IP>:8000` and accept the certificate warning once per device. "Now
 playing" and the lyrics follow the media playing on the server PC.
+
+If Windows Firewall blocks Python, see [`tools/`](tools/): an admin script to allow it, or a Node
+relay on a port that's already open.
 
 ## WebSocket protocol
 
