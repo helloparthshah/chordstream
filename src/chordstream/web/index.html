@@ -548,7 +548,7 @@ async function startInner(source, label) {
       tail.connect(lp); tail = lp;
     }
     tail.connect(node);
-    window.sheet?.setLocal({ name: file.name, time: () => player.currentTime, playing: () => !player.paused,
+    window.sheet?.setLocal?.({ name: file.name, time: () => player.currentTime, playing: () => !player.paused,
                              duration: () => player.duration });
   } else {
     src = ctx.createMediaStreamSource(new MediaStream(audio));
@@ -579,7 +579,7 @@ async function startInner(source, label) {
   session = (msg = 'Stopped', kind = '') => {
     cancelAnimationFrame(raf);
     stopStream();
-    if (player) { player.pause(); $('playerrow').replaceChildren(); URL.revokeObjectURL(fileUrl); window.sheet?.setLocal(null); }
+    if (player) { player.pause(); $('playerrow').replaceChildren(); URL.revokeObjectURL(fileUrl); window.sheet?.setLocal?.(null); }
     ctx.close(); ws.onclose = null; ws.close();
     document.body.classList.remove('live-mode', 'file-mode');
     setButtons(true);
