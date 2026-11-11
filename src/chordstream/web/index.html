@@ -424,7 +424,7 @@ function onBeatEvent(e) {
     if (conf >= LOCK) { const d = $('pulse'); d.classList.remove('on'); void d.offsetWidth; d.classList.add('on'); }
   }
   const last = b.segs[b.segs.length - 1];
-  if (!last || last.name !== e.name) b.segs.push({ t: e.time - 0.04, name: e.name, label: e.label });
+  if (!last || last.name !== e.name) b.segs.push({ t: e.time - (e.delay || 0) - 0.04, name: e.name, label: e.label });
   const cut = e.time - 8;
   while (b.beats.length && b.beats[0].t < cut) b.beats.shift();
   while (b.segs.length > 1 && b.segs[1].t < cut) b.segs.shift();

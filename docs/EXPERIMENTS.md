@@ -50,6 +50,8 @@ Comparisons inside one experiment always use the same set. Differences under ~0.
 | v5 | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v5)) | 78.9% | 80.8% (36 clean) | 1.6× | +80 ms | E17 |
 | **v6** (extended vocab) | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v6)) | **79.9%** | **80.8% (36 clean)**; 70.3% full vocab | 1.6× | +80 ms | E18 |
 | teacher (offline, sees ±5 s) | never | 82.0% | 82.9% (36 clean) | 1.04× | – | E17 |
+| E23b (label delay 240 ms, human labels) | candidate | 83.0% | 83.9% (36 clean) | 1.44× | +240 ms display | E23 |
+| E24 (extended, human labels) | baseline | 80.9% majmin | 81.0% majmin, 70.7% full (36 clean) | 1.71× | +80 ms | E24 |
 
 Biggest wins: real data (E03, +28 pts over synthetic only), training budget (E13/E15, +2.4),
 more data (E08, +2), distillation (E17, +0.7), transition loss (E09, lag 120 → 40–80 ms).
@@ -256,18 +258,51 @@ Dates are the day the experiment ran.
   dropped under the no-distillation policy.)
 - **Result:** pending.
 
-### E23 · Small lookahead via label delay (120 / 240 ms) · 2026-11-12 — queued (runs after E22)
+### E23 · Small lookahead via label delay (120 / 240 ms) · 2026-11-12 — `models/e23a_delay3`, `models/e23b_delay6`
 - **Setup:** `--label-delay 3` / `6`: the causal network is trained so that output t names the chord
   of frame t − d, giving each decision d frames of "future" context with no architecture change (the
   KV-cached ONNX step is unchanged; the display is d × 40 ms late). `predict_song` realigns outputs,
   so the metrics score the frames being described. Human labels only; same recipe and baseline as E22.
-- **Result:** pending.
+- **Fair baseline:** the same delay spent in the decoder instead: `v4_clean` with a fixed-lag HMM
+  (frame s decided at s + d using frames s+1..s+d), as in F01.
+- **Result (36 clean held-out, bundle HMM):**
+
+  | delay | model | acc | original 10 | changes | change-F |
+  |---|---|---|---|---|---|
+  | 0 | `v4_clean` | 80.6% | 79.3% | 2.01× | 0.564 |
+  | 120 ms | `v4_clean` + fixed-lag 3 | 81.7% | 80.6% | 1.82× | 0.613 |
+  | 120 ms | **E23a** (label delay 3) | **82.9%** | **82.0%** | **1.68×** | **0.650** |
+  | 240 ms | `v4_clean` + fixed-lag 6 | 81.8% | 80.9% | 1.70× | 0.633 |
+  | 240 ms | **E23b** (label delay 6) | **83.9%** | **83.0%** | **1.44×** | **0.693** |
+  | offline | teacher (±5 s) | 82.9% | 82.0% | 1.04× | 0.71 |
+
+  Paired per song at equal delay: E23a +1.24 pt, 95% CI [+0.78, +1.76], better on 29/36, sign test
+  p = 0.0003; E23b +2.08 pt, CI [+1.28, +2.99], 30/36, p = 0.0001. Fixed-lag decoding on top of a
+  label-delay model adds little (E23b + lag 6: 83.9%, 1.34×). HMM grid (1–8 s × power 1–3) moves
+  accuracy < 0.5 pt for every model; power 1 trades ~0.3–0.5 pt for ~15% fewer changes.
+- **Engine:** `ChordStream` reads `label_delay` from the bundle; events carry `delay` (seconds) and
+  per-beat chords are pooled over the frames they describe. Streaming check on a held-out song:
+  per-frame accuracy 76.9% scored at the described frames vs 75.3% if the delay were ignored.
+- **Decision:** adopted. Training for the delay is worth +1.2–2.1 pt over spending the same delay in
+  the decoder, and E23b beats the offline teacher's accuracy with 240 ms of delay. Flutter is
+  reduced (2.01× → 1.44×) but not gone. Next: the same on the extended vocabulary (E25).
 
 ### E24 · Extended vocabulary without distillation · 2026-11-12 — queued (runs after E23)
 - **Setup:** E18's data and heads (`data/cache_ext`, `--vocab extended`) with E15's recipe, human labels
   only. Compared with v6 (the distilled extended model) in both majmin and full-vocabulary views.
 - **Purpose:** a non-distilled replacement for v6, and a measure of what distillation contributed to it.
-- **Result:** pending.
+- **Result (36 clean held-out):** both with v6's deployed decoder (HMM 5 s, power 2):
+
+  | | v6 (distilled) | E24 (human labels only) |
+  |---|---|---|
+  | majmin view | 80.8% | **81.0%** |
+  | full vocabulary | 70.3% | **70.7%** |
+  | changes / change-F (majmin) | **1.61×** / 0.594 | 1.71× / **0.604** |
+
+  With its own training-time HMM (power 3): 81.2% majmin, 70.9% full, 1.99×.
+- **Decision:** distillation contributed nothing measurable on the extended model, so E24 replaces
+  v6 as the non-distilled extended baseline. Not deployed by itself: E25 (with label delay) is the
+  deployment candidate.
 
 ---
 
@@ -275,6 +310,7 @@ Dates are the day the experiment ran.
 
 | ID | Experiment | Question | Notes |
 |---|---|---|---|
+| E25 | Extended vocabulary + label delay 3 / 6 (`experiments/2026-11-12_ext_delay.ps1`) | Do E23's gains carry over to the 109-class model? | Running. Baseline E24 and E24 + fixed-lag at equal delay. Deployment candidate (human labels only) |
 | E21 | Bollywood domain adaptation | All 394 labelled songs are US Billboard hits (1958–1991); no Bollywood | Human labels only (no-distillation policy): UG chord sheets anchored to timed lyrics (LRCLIB + Whisper) as approximately timed labels for sung sections, for both training and a timed test set; untimed sheet comparison as a fallback. First probe: *Raat Bhar* (Heropanti) with v6 vs its UG sheet (E, B, C♯m, A, D): key **matches** (E major); 93% of time on the sheet's chords (extra: G♯m 6%); 88% of the sheet's 75 changes found in order; over-segmented 136 vs 75 changes, mostly A↔C♯m and C♯m↔B wavering. Use this scoring (key, time-in-sheet, sequence coverage) for the Bollywood test set. **Timed labels idea:** UG sheets put chords over words and LRCLIB + Whisper time the words, so sheet + lyrics give approximately timed human chord labels for sung sections; use them as a timed test set and to check/correct teacher pseudo-labels. Note: training-label sync is checked against audio (fetch-time alignment, E14 audit), never lyrics; pseudo-labels are aligned by construction |
 | later | Seed repeats for v4 vs v5 | Is the distillation gain robust to training randomness? | Retrain both with a second seed (~40 min) |
 | later | Key-aware chord spelling | Names use one fixed spelling (A♭m instead of G♯m in E major) | Display only |
@@ -294,3 +330,6 @@ Dates are the day the experiment ran.
 | `exp_a`, `exp_b`, `exp_w2/3/5`, `exp_g10`, `synth_g10`, `exp_lr3`, `exp_big`, `synth_big`, `v4_clean`, `v4_orig`, `student` | E08–E17 | experiment outputs; safe to delete |
 | `ext_teacher` | E18 | offline teacher for extended-vocabulary distillation |
 | `ext_student` | E18 | same weights as `v6` (before HMM retune); safe to delete |
+| `e19_hpss`, `e20_key`, `e22a_stability` | E19, E20, E22 | experiment outputs; safe to delete |
+| `e23a_delay3`, `e23b_delay6` | E23 | label-delay majmin models (e23a exported to ONNX) |
+| `e24_ext_nodistill` | E24 | non-distilled extended baseline |

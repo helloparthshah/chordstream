@@ -1,7 +1,9 @@
 """Real-time inference engine: numpy CQT + onnxruntime + causal HMM. No torch required.
 
 Each 40 ms hop of audio yields exactly one decision, computed from audio up to and
-including that hop: zero lookahead. Algorithmic latency is one hop (40 ms) plus
+including that hop: zero lookahead. A label-delay model (E23, `label_delay` = d frames) names the
+chord of the frame d hops ago instead, so its decisions use d frames of "future" context; events
+then carry `delay` = d x 40 ms and the per-beat chords are pooled over the frames they describe. Algorithmic latency is one hop (40 ms) plus
 compute time (printed by `chordstream transcribe --bench`).
 """
 
@@ -39,6 +41,7 @@ class ChordEvent:
     beat_label: str | None = None
     beat_name: str | None = None
     beat_t0: float | None = None
+    delay: float = 0.0  # the chord fields describe the audio at time - delay (label-delay models)
 
     def as_dict(self) -> dict:
         return self.__dict__.copy()
@@ -75,6 +78,7 @@ class ChordStream:
         self.current = -1
         self.beat_acc = np.zeros(self.cfg.model.n_classes, np.float64)
         self.beat_start = 0.0
+        self.pending_beats: list[int] = []  # frame counts where a beat was flagged, not yet pooled
         self.compute_ms: list[float] = []
         if self.hmm:
             self.hmm.reset()
@@ -99,15 +103,22 @@ class ChordStream:
             self.n_frames += 1
             changed = idx != self.current
             self.current = idx
-            now = self.n_frames * self.cfg.frontend.frame_seconds
+            fs = self.cfg.frontend.frame_seconds
+            d = self.cfg.model.label_delay
+            now = self.n_frames * fs
             ev = ChordEvent(now, idx, CLASS_NAMES[idx], pretty_name(idx), conf, raw, changed, b.beat,
-                            round(b.bpm, 1), round(b.confidence, 2))
-            self.beat_acc += probs
-            if b.beat:  # this frame closes a beat
+                            round(b.bpm, 1), round(b.confidence, 2), delay=d * fs)
+            if self.n_frames > d:  # probs describe frame n_frames - d; earlier ones describe nothing
+                self.beat_acc += probs
+            if b.beat:
+                self.pending_beats.append(self.n_frames)
+            # A beat closes once the frames it covers have all been described (d hops after the beat).
+            if self.pending_beats and self.n_frames - d >= self.pending_beats[0]:
+                end = self.pending_beats.pop(0) * fs
                 j = int(self.beat_acc.argmax())
                 ev.beat_label, ev.beat_name, ev.beat_t0 = CLASS_NAMES[j], pretty_name(j), round(self.beat_start, 3)
                 self.beat_acc[:] = 0.0
-                self.beat_start = now
+                self.beat_start = end
             events.append(ev)
         return events
 
@@ -115,9 +126,9 @@ class ChordStream:
 def events_to_segments(events: list[ChordEvent], frame_seconds: float):
     segs = []
     for e in events:
-        start = e.time - frame_seconds
+        end = e.time - e.delay
         if segs and segs[-1][2] == e.label:
-            segs[-1] = (segs[-1][0], e.time, e.label)
+            segs[-1] = (segs[-1][0], end, e.label)
         else:
-            segs.append((start, e.time, e.label))
+            segs.append((end - frame_seconds, end, e.label))
     return segs
