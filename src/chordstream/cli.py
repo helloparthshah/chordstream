@@ -68,10 +68,11 @@ def cmd_train(a):
 
     ext = a.vocab == "extended"
     mcfg = ModelConfig(context_frames=a.context, d_model=a.d_model, n_layers=a.layers,
-                       n_classes=N_EXT if ext else N_CLASSES, structured=ext or a.structured, key_input=a.key_input)
+                       n_classes=N_EXT if ext else N_CLASSES, structured=ext or a.structured, key_input=a.key_input,
+                       label_delay=a.label_delay)
     train(a.cache, a.out, a.epochs, a.batch_size, a.lr, a.crops, a.init, a.progressions, a.holdout_prefix,
           a.workers, a.device, mcfg, a.transition_weight, a.transition_window, a.seed, FrontendConfig(gamma=a.gamma),
-          a.eval_every, a.bidirectional, a.distill_weight, a.aux_weight)
+          a.eval_every, a.bidirectional, a.distill_weight, a.aux_weight, a.stability_weight)
 
 
 def cmd_export(a):
@@ -294,6 +295,10 @@ def main(argv=None):
     s.add_argument("--structured", action="store_true", help="add root/bass/notes heads (implied by extended)")
     s.add_argument("--aux-weight", type=float, default=0.5, help="weight of the structured-head losses")
     s.add_argument("--key-input", action="store_true", help="E20: cache has 12 key-signature columns after the CQT")
+    s.add_argument("--stability-weight", type=float, default=0.0,
+                   help="E22: penalise frame-to-frame prediction change where the chord is constant")
+    s.add_argument("--label-delay", type=int, default=0,
+                   help="E23: output names the chord this many frames earlier (lookahead = delay x 40 ms)")
     s.add_argument("--gamma", type=float, default=FrontendConfig.gamma, help="frontend gamma (fresh models only; "
                    "must match the --gamma the cache was built with)")
     s.set_defaults(fn=cmd_train)

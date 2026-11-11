@@ -1,12 +1,96 @@
 # chordstream
 
-Real-time, zero-lookahead chord recognition from live audio. Each 40 ms of audio
-produces one decision (24 major/minor triads + N.C.), computed only from audio
-already heard.
+Real-time, zero-lookahead chord recognition from live audio. Each 40 ms of audio produces one
+decision, computed only from audio already heard. The live model (v6) names 108 chords
+(12 roots × maj, min, 7, maj7, m7, dim, aug, sus2, sus4) plus "no chord".
 
+## Architecture
+
+### System
+
+Audio comes from a microphone, a loopback device, a shared tab or a local file. The browser streams
+16 kHz PCM over a WebSocket, and the server answers each 40 ms frame with a chord event. The chord
+sheet combines those events with the song's timed lyrics.
+
+```mermaid
+flowchart LR
+    subgraph Browser["Browser (phone or PC)"]
+        SRC["Mic / loopback / tab audio<br/>or Play file"] --> WL["AudioWorklet<br/>mono 16 kHz, 40 ms chunks"]
+        UI["Live chord + diagram<br/>visualizer, BPM, timeline"]
+        SHEET["Chord sheet<br/>chords over lyrics"]
+    end
+    subgraph Server["chordstream server (FastAPI)"]
+        ENG["Streaming engine<br/>(see below)"]
+        ASR["Whisper (optional)<br/>sung-word timestamps"]
+        NP["Windows media session<br/>now playing + position"]
+        LY["LRCLIB<br/>timed lyrics (cached)"]
+    end
+    WL -- "WebSocket: PCM" --> ENG
+    WL -- "same audio" --> ASR
+    ENG -- "chord per frame,<br/>chord per beat, BPM" --> UI
+    ENG -- "per-beat chords" --> SHEET
+    ASR -- "word times" --> SHEET
+    NP --> SHEET
+    LY --> SHEET
 ```
-mic ─▶ causal CQT (40 ms hop) ─▶ causal CNN ─▶ banded causal Transformer (KV cache) ─▶ softmax ─▶ forward-HMM ─▶ chord
+
+### Streaming engine (one 40 ms step)
+
+Everything is causal: each step uses only audio up to "now". The network runs incrementally, with
+the CNN on its 13-frame receptive field and a per-layer KV cache, so a step costs about 2–3 ms of CPU.
+
+```mermaid
+flowchart LR
+    PCM["640 new samples<br/>(40 ms)"] --> CQT["Causal variable-Q CQT<br/>144 bins, C2–B7<br/>kernels end at 'now'"]
+    CQT --> NET["ChordNet step (ONNX)<br/>CNN + Transformer<br/>with KV cache"]
+    NET --> P["Chord posteriors<br/>(109 classes)"]
+    P --> HMM["Forward-only HMM<br/>no backtracking,<br/>no added latency"]
+    HMM --> LIVE["Live chord<br/>(zero lookahead)"]
+    P --> POOL["Average over the<br/>current beat"]
+    CQT --> BT["Causal beat tracker<br/>onset flux, tempo, phase"]
+    BT --> POOL
+    BT --> BPM["BPM + beat pulse"]
+    POOL --> BEAT["Per-beat chord<br/>(one beat late)<br/>for the sheet"]
 ```
+
+### Model (ChordNet)
+
+```mermaid
+flowchart TB
+    IN["Log-CQT frames<br/>T × 144"] --> C1["Causal conv block × 3<br/>16 → 32 → 64 channels<br/>time padding on the left only,<br/>max-pool along frequency"]
+    C1 --> PR["Linear projection<br/>→ 192-d per frame"]
+    PR --> TR["Transformer encoder × 4<br/>4 heads, ALiBi distance bias,<br/>banded causal mask: last 128 frames (~5 s)"]
+    TR --> H1["Chord head<br/>109 classes (exported)"]
+    TR -. training only .-> H2["Root head (13)"]
+    TR -. training only .-> H3["Bass head (13)"]
+    TR -. training only .-> H4["Notes head<br/>12 × binary"]
+```
+
+The extra heads let rare chords and power chords (which have no class) still teach the shared layers.
+The offline teacher is the same network with a symmetric ±5 s attention band and centred convolutions.
+
+### Training pipeline
+
+```mermaid
+flowchart TB
+    UG["Ultimate Guitar progressions"] --> SYN["Synthetic renders<br/>(exact labels)"]
+    SYN --> PRE["Pretrain on synthetic audio<br/>models/latest"]
+    BB["McGill Billboard annotations"] --> FETCH["YouTube fetch<br/>duration match"]
+    FETCH --> ALIGN{"Chroma alignment check<br/>offset, key, drift"}
+    ALIGN -- "pass (394)" --> AUD["Audit + re-time labels<br/>exclude drifting songs (367 kept)"]
+    ALIGN -- "reject (231)" --> UNL["Unlabelled audio"]
+    AUD --> TEA["Teacher<br/>bidirectional, offline"]
+    PRE --> TEA
+    TEA --> PS["Pseudo-labels<br/>teacher posteriors"]
+    UNL --> PS
+    AUD --> STU["Causal student<br/>labels + teacher KL<br/>+ transition weighting"]
+    PS --> STU
+    PRE --> STU
+    STU --> EVAL["chordstream evaluate<br/>streaming-exact metrics"]
+    EVAL --> EXP["ONNX export<br/>+ GitHub release"]
+```
+
+Every experiment behind these choices is in [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
 
 ## Design notes
 
@@ -16,7 +100,7 @@ mic ─▶ causal CQT (40 ms hop) ─▶ causal CNN ─▶ banded causal Transfo
 | Causality | CNN pads time on the left only. Attention uses a causal band of 128 frames (~5 s) with ALiBi bias. Tests check that future input never changes past output. |
 | Streaming cost | ONNX runs one step per frame: the CNN sees its 13-frame receptive field, and each layer keeps a 127-entry KV cache. A test checks this matches the full forward pass exactly. |
 | Smoothing | HMM **forward filtering** only, never Viterbi backtracking, so smoothing adds no latency. Transitions = self-loop from median chord length plus a chord-change prior. |
-| Vocabulary | Extended chords map to their triad (Cmaj7→C, Am9→Am). dim/aug/sus/power chords are `IGNORE`: left out of the loss, not forced into a wrong class. |
+| Vocabulary | 109 classes: 12 roots × 9 qualities + N; the first 25 are the classic major/minor set. Richer chords fold into the nearest quality (Cadd9→C, C9→C7, hdim7→dim). Power chords have no class but still train the root/bass/notes heads. |
 | UG "grammar" | Supplies (1) the HMM's chord-change matrix, counted in all 12 keys, and (2) progressions for the synthetic-audio renderer. |
 | Pitch augmentation | Shift CQT bins by ±semitones and transpose the labels, applied to every training crop. |
 

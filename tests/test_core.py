@@ -343,3 +343,32 @@ def test_key_input_columns_feed_the_model():
     x2[..., 144:] = torch.roll(x[..., 144:], 3, -1)
     with torch.no_grad():
         assert not torch.allclose(net(x), net(x2))
+
+
+def test_delay_targets_and_stability_loss():
+    torch = pytest.importorskip("torch")
+    from chordstream.train import delay_targets, stability_loss
+
+    y = torch.tensor([[1, 1, 2, 2, 2, 3]])
+    q = torch.eye(25)[y.clamp_min(0)]
+    aux = torch.zeros(1, 6, 3, dtype=torch.long)
+    y2, q2, _ = delay_targets(y, q, aux, 2)
+    assert y2.tolist() == [[-1, -1, 1, 1, 2, 2]] and torch.equal(q2[0, 2:], q[0, :4])
+    steady = torch.zeros(1, 40, 25)
+    steady[..., 3] = 5.0
+    flicker = steady.clone()
+    flicker[0, 20:22, 3], flicker[0, 20:22, 7] = 0.0, 5.0
+    lab = torch.full((1, 40), 3)
+    assert stability_loss(steady, lab) < 1e-6 < stability_loss(flicker, lab)
+
+
+def test_label_delay_predictions_are_realigned():
+    torch = pytest.importorskip("torch")
+    from chordstream.config import ModelConfig
+    from chordstream.model import ChordNet
+    from chordstream.train import _predict_song, predict_song
+
+    net = ChordNet(ModelConfig(d_model=32, n_layers=1, context_frames=8, label_delay=3)).eval()
+    feats = np.random.default_rng(0).random((100, 144)).astype(np.float32)
+    raw, aligned = _predict_song(net, feats, "cpu"), predict_song(net, feats, "cpu")
+    np.testing.assert_allclose(aligned[:97], raw[3:])

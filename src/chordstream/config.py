@@ -48,6 +48,10 @@ class ModelConfig:
     # E20 experiment: 12 extra input columns after the CQT bins carry a key-signature vector,
     # projected and added to every frame's embedding.
     key_input: bool = False
+    # E23: the output at frame t names the chord of frame t - label_delay, so every decision has
+    # label_delay frames of "future" context (display latency = label_delay x 40 ms). The network
+    # and the KV-cached streaming step are unchanged; only the meaning of the output shifts.
+    label_delay: int = 0
 
 
 @dataclass

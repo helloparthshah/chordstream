@@ -45,6 +45,31 @@ def _collate(batch):
     return x, y, q, aux
 
 
+def delay_targets(y: torch.Tensor, q: torch.Tensor, aux: torch.Tensor, d: int):
+    """E23: shift targets d frames later in time, so output t is trained to name frame t - d."""
+    if d <= 0:
+        return y, q, aux
+    y2 = torch.full_like(y, IGNORE)
+    y2[:, d:] = y[:, :-d]
+    q2 = torch.zeros_like(q)
+    q2[:, d:] = q[:, :-d]
+    aux2 = aux.clone()
+    aux2[:, :d, :2] = IGNORE
+    aux2[:, :d, 2] = -1
+    aux2[:, d:] = aux[:, :-d]
+    return y2, q2, aux2
+
+
+def stability_loss(logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """E22: squared change of the predicted distribution between consecutive frames, counted only
+    where the true chord does not change (so real changes are not discouraged)."""
+    p = torch.softmax(logits.float(), -1)
+    diff = (p[:, 1:] - p[:, :-1]).pow(2).sum(-1)
+    same = (y[:, 1:] == y[:, :-1]) & (y[:, 1:] != IGNORE)
+    same[:, :WARMUP_CONTEXT] = False
+    return diff[same].mean() if same.any() else logits.sum() * 0
+
+
 def structured_loss(out: dict, aux: torch.Tensor) -> torch.Tensor:
     """Root + bass cross-entropy and per-note binary cross-entropy (unknown targets skipped)."""
     root, bass, notes = aux[..., 0], aux[..., 1], aux[..., 2]
@@ -59,6 +84,16 @@ def structured_loss(out: dict, aux: torch.Tensor) -> torch.Tensor:
 
 @torch.no_grad()
 def predict_song(net: ChordNet, feats: np.ndarray, device, chunk: int = 1024) -> np.ndarray:
+    """Posteriors aligned to the frames they describe (a label-delay model's output t is frame t - d)."""
+    probs = _predict_song(net, feats, device, chunk)
+    d = getattr(net.cfg, "label_delay", 0)
+    if d > 0:
+        probs = np.concatenate([probs[d:], np.repeat(probs[-1:], d, 0)])
+    return probs
+
+
+@torch.no_grad()
+def _predict_song(net: ChordNet, feats: np.ndarray, device, chunk: int = 1024) -> np.ndarray:
     """Exact whole-song causal posteriors, computed in overlapping chunks.
 
     Each output's dependency cone spans n_layers * (context_frames - 1) + CNN receptive
@@ -156,6 +191,7 @@ def train(
     bidirectional: bool = False,
     distill_weight: float = 1.0,
     aux_weight: float = 0.5,
+    stability_weight: float = 0.0,
 ) -> Path:
     if seed is not None:
         torch.manual_seed(seed)
@@ -170,6 +206,7 @@ def train(
             bundle.model.n_classes = model_cfg.n_classes
             bundle.model.structured = model_cfg.structured
             bundle.model.key_input = model_cfg.key_input
+            bundle.model.label_delay = model_cfg.label_delay
     else:
         bundle = BundleConfig(frontend_cfg or FrontendConfig(), model_cfg or ModelConfig())
     if bidirectional:  # offline teacher (weights from a causal init transfer: same shapes)
@@ -214,6 +251,7 @@ def train(
         t0, tot, n = time.time(), 0.0, 0
         for x, y, q, aux in dl:
             x, y, q, aux = (t.to(dev, non_blocking=True) for t in (x, y, q, aux))
+            y, q, aux = delay_targets(y, q, aux, mcfg.label_delay)
             y[:, :WARMUP_CONTEXT] = IGNORE
             aux[:, :WARMUP_CONTEXT, :2] = IGNORE
             aux[:, :WARMUP_CONTEXT, 2] = -1
@@ -233,6 +271,8 @@ def train(
                 logp = F.log_softmax(logits.float(), -1)
                 kl = (q * (torch.log(q.clamp_min(1e-8)) - logp)).sum(-1)
                 loss = loss + distill_weight * kl[has_q].mean()
+            if stability_weight > 0:
+                loss = loss + stability_weight * stability_loss(logits, y)
             if mcfg.structured and aux_weight > 0:
                 loss = loss + aux_weight * structured_loss(out, aux)
             opt.zero_grad(set_to_none=True)
