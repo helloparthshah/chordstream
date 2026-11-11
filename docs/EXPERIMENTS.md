@@ -206,22 +206,27 @@ Dates are the day the experiment ran.
   dim/aug/sus2 are too rare to learn from 331 songs. More data for those qualities (or
   synthetic renders of them) is the lever.
 
-### E19 · Causal harmonic/percussive separation (HPSS) · 2026-11-12 — running
+### E19 · Causal harmonic/percussive separation (HPSS) · 2026-11-12 — `models/e19_hpss`
 - **Script:** [`experiments/2026-11-12_hpss_and_key_input.ps1`](../experiments/2026-11-12_hpss_and_key_input.ps1)
 - **Question:** does suppressing drums before the network help a deep model?
 - **Setup:** `data/variants.hpss_causal`: soft mask H²/(H²+P²) per frame, H = median over the
   current + 4 previous frames, P = median over 17 neighbouring bins; past frames only. Same recipe
   as E15's `v4_clean` (baseline: 80.6% raw on 36 clean held-out).
 - **Risk:** the past-only time median may delay new notes; watch lag as well as accuracy.
-- **Result:** pending.
+- **Result (36 clean held-out, smoothed):** 80.4% vs `v4_clean` 80.6%; original 10: 78.9% vs 79.3%;
+  changes 2.05× vs 2.01×, change-F 0.558 vs 0.564.
+- **Decision:** rejected. No gain; the network already copes with drums.
 
-### E20 · Key-signature input, oracle ceiling · 2026-11-12 — running
+### E20 · Key-signature input, oracle ceiling · 2026-11-12 — `models/e20_key`
 - **Question:** how much could the Transformer gain from knowing the key? (Upper bound.)
 - **Setup:** each song's true key signature (from its annotations, via `key.fit_relative_profile`)
   as 12 extra input columns, projected and added to every frame (`--key-input`); rotated with
   pitch-shift augmentation. Same recipe and baseline as E19.
 - **Decision rule:** pursue a causal version (decaying 60 s note profile) only if this gains ≥ 0.5 pt.
-- **Result:** pending.
+- **Result (36 clean held-out, smoothed):** 81.1% vs `v4_clean` 80.6% (+0.5); original 10: 79.4% vs
+  79.3%; changes 1.98× vs 2.01×, change-F 0.574 vs 0.564.
+- **Decision:** not pursued. Even a perfect key gains only +0.5, at the threshold and within noise,
+  and a causal estimate can only do worse. This matches E07: most errors are between in-key chords.
 
 ### F01 · Flutter diagnosis (decoding only, no retraining) · 2026-11-12
 - **Question:** where do the extra chord changes (1.6× the reference) come from, and can decoding fix them?
