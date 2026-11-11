@@ -256,7 +256,14 @@ Dates are the day the experiment ran.
   (80.6% raw). **E22a** `--stability-weight 2`: squared change of the predicted distribution between
   consecutive frames, counted only where the true chord is constant. (E22b, harder distillation, was
   dropped under the no-distillation policy.)
-- **Result:** pending.
+- **Note:** the first run died at epoch 45 on a CUDA "unspecified launch failure" (driver fault; the
+  other runs in the batch were fine); rerun from scratch with the same command.
+- **Result (36 clean held-out, zero delay):** 80.4% vs `v4_clean` 80.6%; original 10: 79.1% vs 79.3%;
+  changes **1.78×** vs 2.01×, change-F **0.590** vs 0.564. With fixed-lag 3 / 6: 81.8% / 81.9%
+  (vs 81.7% / 81.8%).
+- **Decision:** not adopted. ~11% fewer changes for −0.2 pt, but simply decoding `v4_clean` with a
+  flatter HMM (power 1) gives a similar trade (80.0%, 1.61×, change-F 0.602) with no retraining. A
+  loss term can't remove flutter without future context; E23 can.
 
 ### E23 · Small lookahead via label delay (120 / 240 ms) · 2026-11-12 — `models/e23a_delay3`, `models/e23b_delay6`
 - **Setup:** `--label-delay 3` / `6`: the causal network is trained so that output t names the chord
