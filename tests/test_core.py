@@ -183,3 +183,12 @@ def test_romanize_devanagari_for_romanized_lyrics():
     assert romanize("दिल") == "dil"  # schwa deletion: not "dila"
     assert romanize("तेरी") == "terī"
     assert romanize("hello") == "hello"
+
+
+def test_transition_weights_mark_frames_after_changes():
+    torch = pytest.importorskip("torch")
+    from chordstream.train import transition_weights
+
+    y = torch.tensor([[1, 1, 1, 5, 5, 5, 5, -1, -1, 5]])
+    w = transition_weights(y, 3.0, 2)
+    assert w.tolist() == [[1, 1, 1, 3, 3, 1, 1, 1, 1, 1]]  # change at frame 3; IGNORE gaps don't count

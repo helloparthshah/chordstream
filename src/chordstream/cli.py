@@ -66,7 +66,7 @@ def cmd_train(a):
 
     mcfg = ModelConfig(context_frames=a.context, d_model=a.d_model, n_layers=a.layers)
     train(a.cache, a.out, a.epochs, a.batch_size, a.lr, a.crops, a.init, a.progressions, a.holdout_prefix,
-          a.workers, a.device, mcfg)
+          a.workers, a.device, mcfg, a.transition_weight, a.transition_window, a.seed)
 
 
 def cmd_export(a):
@@ -108,6 +108,17 @@ def cmd_transcribe(a):
         pred = np.array([e.index for e in events])
         valid = ref != IGNORE
         print(f"frame accuracy vs reference: {(pred[valid] == ref[valid]).mean():.3f}")
+
+
+def cmd_evaluate(a):
+    from .evaluate import ORIGINAL_VAL, run
+
+    for name, ids in (("all held-out", None), ("original 10", ORIGINAL_VAL)):
+        for bundle in a.bundles:
+            r = run(bundle, a.cache, ids=ids)
+            b = r["baseline"]
+            print(f"{name:13s} {bundle:22s} songs {r['songs']:3d}  raw {b['raw_acc']:.3f}  hmm {b['acc']:.3f}  "
+                  f"changes {b['change_ratio']:.2f}x  change_f {b['change_f']:.3f}  lag {b['lag_ms']:+.0f} ms", flush=True)
 
 
 def cmd_serve(a):
@@ -238,7 +249,15 @@ def main(argv=None):
     s.add_argument("--holdout-prefix", help="cache files with this prefix form the val set")
     s.add_argument("--workers", type=int, default=2)
     s.add_argument("--device")
+    s.add_argument("--transition-weight", type=float, default=1.0, help="loss weight just after chord changes")
+    s.add_argument("--transition-window", type=float, default=0.5, help="seconds after a change to up-weight")
+    s.add_argument("--seed", type=int, default=0)
     s.set_defaults(fn=cmd_train)
+
+    s = sp.add_parser("evaluate", help="streaming-exact metrics on held-out annotated songs")
+    s.add_argument("bundles", nargs="+")
+    s.add_argument("--cache", default="data/cache_bb")
+    s.set_defaults(fn=cmd_evaluate)
 
     s = sp.add_parser("export", help="export bundle to ONNX (+ parity check)")
     s.add_argument("bundle", nargs="?", default="models/latest")

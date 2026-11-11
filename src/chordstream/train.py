@@ -23,6 +23,20 @@ from .vocab import IGNORE, N_CLASSES
 WARMUP_CONTEXT = 16  # frames at the start of each crop that are context-only (no loss)
 
 
+def transition_weights(y: torch.Tensor, weight: float, window: int) -> torch.Tensor:
+    """Per-frame loss weights: `weight` for the `window` frames starting at each chord change.
+
+    46% of errors were late switches (the previous chord still shown after a change), so
+    those frames are up-weighted to push the causal model to commit to new chords sooner.
+    """
+    if weight == 1.0 or window <= 0:
+        return torch.ones_like(y, dtype=torch.float32)
+    change = torch.zeros_like(y, dtype=torch.float32)
+    change[:, 1:] = ((y[:, 1:] != y[:, :-1]) & (y[:, 1:] != IGNORE) & (y[:, :-1] != IGNORE)).float()
+    near = F.max_pool1d(F.pad(change[:, None], (window - 1, 0)), window, stride=1)[:, 0]
+    return 1.0 + (weight - 1.0) * near
+
+
 def _collate(batch):
     x = torch.from_numpy(np.stack([b[0] for b in batch]))
     y = torch.from_numpy(np.stack([b[1] for b in batch]))
@@ -108,7 +122,13 @@ def train(
     workers: int = 2,
     device: str | None = None,
     model_cfg: ModelConfig | None = None,
+    transition_weight: float = 1.0,
+    transition_window_s: float = 0.5,
+    seed: int | None = 0,
 ) -> Path:
+    if seed is not None:
+        torch.manual_seed(seed)
+        np.random.seed(seed)
     out_dir = Path(out)
     out_dir.mkdir(parents=True, exist_ok=True)
     dev = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -150,8 +170,11 @@ def train(
             y[:, :WARMUP_CONTEXT] = IGNORE
             with torch.autocast(dev.type, dtype=torch.float16, enabled=use_amp):
                 logits = net(x)
-            loss = F.cross_entropy(logits.float().reshape(-1, N_CLASSES), y.reshape(-1), ignore_index=IGNORE,
-                                   label_smoothing=0.05)
+            ce = F.cross_entropy(logits.float().reshape(-1, N_CLASSES), y.reshape(-1), ignore_index=IGNORE,
+                                 label_smoothing=0.05, reduction="none")
+            w = transition_weights(y, transition_weight, round(transition_window_s / fcfg.frame_seconds)).reshape(-1)
+            w = w * (y.reshape(-1) != IGNORE)
+            loss = (ce * w).sum() / w.sum().clamp_min(1.0)
             opt.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
             scaler.unscale_(opt)

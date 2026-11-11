@@ -7,6 +7,7 @@ via the exact chunked forward pass, beat tracker and HMM frame by frame). Metric
   change_ratio predicted chord changes / reference changes (1.0 = no over-segmentation)
   change_f     F-measure of predicted vs reference change points within +-tol seconds
   change_dev   median |predicted change - nearest reference change| for hits (seconds)
+  lag_ms       median signed timing of detected changes (positive = late)
   beat_f       beat tracker F-measure vs Billboard bar-derived beats (+-70 ms)
 """
 
@@ -65,7 +66,7 @@ def song_inputs(cache_file: Path, net, device, raw: Path, offsets: dict) -> dict
 
 def score(songs: list[dict], hmm: OnlineHMM, beat_cfg: dict | None, tol: float = 0.25) -> dict:
     correct = total = n_pred = n_ref = 0
-    fs, devs = [], []
+    fs, devs, signed = [], [], []
     for s in songs:
         scales = None
         if beat_cfg is not None:
@@ -80,8 +81,12 @@ def score(songs: list[dict], hmm: OnlineHMM, beat_cfg: dict | None, tol: float =
         f, dv = match_f(pc, rc, tol)
         fs.append(f)
         devs += dv
+        signed += match_f(pc, rc, 0.5)[1]
     return {"acc": correct / max(1, total), "change_ratio": n_pred / max(1, n_ref),
-            "change_f": float(np.mean(fs)), "change_dev": float(np.median(np.abs(devs))) if devs else None}
+            "change_f": float(np.mean(fs)), "change_dev": float(np.median(np.abs(devs))) if devs else None,
+            "lag_ms": float(np.median(signed) * 1000) if signed else None,
+            "raw_acc": float(sum(((s["probs"].argmax(1) == s["labels"]) & (s["labels"] != IGNORE)).sum() for s in songs)
+                             / max(1, sum((s["labels"] != IGNORE).sum() for s in songs)))}
 
 
 def beat_quality(songs: list[dict]) -> dict:
@@ -97,8 +102,12 @@ def beat_quality(songs: list[dict]) -> dict:
             "songs": len(fs)}
 
 
+# The first 10 held-out songs, used for every result reported before the dataset grew.
+ORIGINAL_VAL = ["0010", "0023", "0068", "0104", "0105", "0124", "0208", "0221", "0223", "0245"]
+
+
 def run(bundle: str, cache: str, raw: str = "data/billboard_raw", manifest: str = "data/billboard/manifest.jsonl",
-        grid: bool = True) -> dict:
+        grid: bool = False, ids: list[str] | None = None) -> dict:
     import torch
 
     from .data.dataset import split_files
@@ -114,6 +123,8 @@ def run(bundle: str, cache: str, raw: str = "data/billboard_raw", manifest: str 
             if r.get("status") == "accepted":
                 offsets[r["id"]] = r["offset"]
     _, val = split_files(cache)
+    if ids is not None:
+        val = [f for f in val if f.stem.split("__")[-1] in set(ids)]
     songs = [song_inputs(f, net, dev, Path(raw), offsets) for f in val]
     hmm = OnlineHMM.load(Path(bundle) / "hmm.npz")
 

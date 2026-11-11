@@ -124,6 +124,12 @@ Measured on 10 held-out Billboard songs (`chordstream.evaluate`), streaming-exac
 | + causal HMM (uniform prior, default) | 73.9% | 1.9–2.0× |
 | + beat-aware HMM (`beat.py`), even with *oracle* beats | 73.8% | 1.83× |
 | + causal key prior (`key.py`) | ≤ 73.8% | 1.8–1.9× |
+| **v2:** 207 real songs, transition-weighted loss (×3, 0.5 s), HMM power 1.5 | **75.5%** (77.0% on all 19 held-out) | 1.9× |
+
+v2 also improved change timing: change-point F rose from 0.433 to 0.503 and median switching
+lag fell from +120 to +80 ms on all held-out songs. More data alone (207 songs, plain loss)
+reaches the same accuracy but keeps the +120 ms lag. Reproduce with
+`chordstream train --transition-weight 3` and `chordstream evaluate models/<bundle>`.
 
 Error analysis:
 - **Late switches:** 46% of errors are the previous chord still showing after a true change.
