@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .beat import BeatTracker
 from .config import BundleConfig
 from .cqt import StreamingCQT
 from .hmm import OnlineHMM
@@ -28,6 +29,9 @@ class ChordEvent:
     confidence: float
     raw_index: int  # un-smoothed network argmax
     changed: bool
+    beat: bool = False  # a beat is predicted to fall in this frame (display only)
+    bpm: float = 0.0
+    beat_conf: float = 0.0
 
     def as_dict(self) -> dict:
         return self.__dict__.copy()
@@ -57,6 +61,7 @@ class ChordStream:
 
     def reset(self) -> None:
         self.cqt = StreamingCQT(self.cfg.frontend)
+        self.beats = BeatTracker(fps=1.0 / self.cfg.frontend.frame_seconds)
         self.frames = np.zeros((1, self.rf, self.cfg.model.n_bins), np.float32)
         self.k, self.v = self.k0.copy(), self.v0.copy()
         self.n_frames = 0
@@ -80,12 +85,14 @@ class ChordStream:
             probs = probs[0]
             raw = int(probs.argmax())
             idx, conf = self.hmm.step(probs) if self.hmm else (raw, float(probs[raw]))
+            b = self.beats.step(frame)
             self.compute_ms.append((time.perf_counter() - t0) * 1000 + cqt_ms)
             self.n_frames += 1
             changed = idx != self.current
             self.current = idx
             events.append(ChordEvent(self.n_frames * self.cfg.frontend.frame_seconds, idx, CLASS_NAMES[idx],
-                                     pretty_name(idx), conf, raw, changed))
+                                     pretty_name(idx), conf, raw, changed, b.beat, round(b.bpm, 1),
+                                     round(b.confidence, 2)))
         return events
 
 

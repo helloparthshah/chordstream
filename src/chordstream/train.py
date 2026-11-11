@@ -125,6 +125,7 @@ def train(
     transition_weight: float = 1.0,
     transition_window_s: float = 0.5,
     seed: int | None = 0,
+    frontend_cfg: FrontendConfig | None = None,
 ) -> Path:
     if seed is not None:
         torch.manual_seed(seed)
@@ -136,7 +137,7 @@ def train(
     if init:
         bundle = BundleConfig.load(Path(init) / "config.json")
     else:
-        bundle = BundleConfig(FrontendConfig(), model_cfg or ModelConfig())
+        bundle = BundleConfig(frontend_cfg or FrontendConfig(), model_cfg or ModelConfig())
     bundle.save(out_dir / "config.json")
     mcfg, fcfg = bundle.model, bundle.frontend
     crop = 2 * mcfg.context_frames  # > window so the banded mask is exercised

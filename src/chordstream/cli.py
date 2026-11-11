@@ -56,7 +56,7 @@ def cmd_features(a):
     from .config import FrontendConfig
     from .data.dataset import cache_features
 
-    n = cache_features(a.src, a.out, FrontendConfig(), a.device)
+    n = cache_features(a.src, a.out, FrontendConfig(gamma=a.gamma), a.device)
     print(f"cached {n} new songs -> {a.out}")
 
 
@@ -66,7 +66,7 @@ def cmd_train(a):
 
     mcfg = ModelConfig(context_frames=a.context, d_model=a.d_model, n_layers=a.layers)
     train(a.cache, a.out, a.epochs, a.batch_size, a.lr, a.crops, a.init, a.progressions, a.holdout_prefix,
-          a.workers, a.device, mcfg, a.transition_weight, a.transition_window, a.seed)
+          a.workers, a.device, mcfg, a.transition_weight, a.transition_window, a.seed, FrontendConfig(gamma=a.gamma))
 
 
 def cmd_export(a):
@@ -191,6 +191,9 @@ def cmd_listen(a):
             pass
 
 
+from .config import FrontendConfig  # noqa: E402  (defaults for argparse)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="chordstream")
     sp = p.add_subparsers(dest="cmd", required=True)
@@ -232,6 +235,8 @@ def main(argv=None):
     s.add_argument("src", nargs="+", help="folders of <stem>.wav + <stem>.lab")
     s.add_argument("--out", default="data/cache")
     s.add_argument("--device")
+    s.add_argument("--gamma", type=float, default=FrontendConfig.gamma,
+                   help="variable-Q offset (Hz): larger = shorter low-frequency windows, faster response")
     s.set_defaults(fn=cmd_features)
 
     s = sp.add_parser("train")
@@ -252,6 +257,8 @@ def main(argv=None):
     s.add_argument("--transition-weight", type=float, default=1.0, help="loss weight just after chord changes")
     s.add_argument("--transition-window", type=float, default=0.5, help="seconds after a change to up-weight")
     s.add_argument("--seed", type=int, default=0)
+    s.add_argument("--gamma", type=float, default=FrontendConfig.gamma, help="frontend gamma (fresh models only; "
+                   "must match the --gamma the cache was built with)")
     s.set_defaults(fn=cmd_train)
 
     s = sp.add_parser("evaluate", help="streaming-exact metrics on held-out annotated songs")

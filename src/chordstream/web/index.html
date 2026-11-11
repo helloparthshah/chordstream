@@ -70,6 +70,12 @@
   canvas { width: 100%; display: block; }
   #spec { height: 92px; }
   #chroma { height: 110px; }
+  #timeline { height: 58px; }
+  .beatinfo { display: inline-flex; align-items: center; gap: 8px; }
+  #pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--chroma-off); transition: background .3s; }
+  #beatrow.locked #pulse { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+  #pulse.on { animation: beat .2s ease-out; }
+  @keyframes beat { 0% { background: var(--accent); transform: scale(1.7); box-shadow: 0 0 12px var(--accent); } 100% { transform: scale(1); } }
 
   .history { margin-top: 16px; padding: 16px 18px; }
   #hist { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; min-height: 36px; }
@@ -165,6 +171,9 @@
       <canvas id="spec"></canvas>
       <div class="vizhead"><span class="label">Pitch classes</span><span class="label">chord tones lit</span></div>
       <canvas id="chroma"></canvas>
+      <div class="vizhead" id="beatrow"><span class="label">Beat</span>
+        <span class="beatinfo"><span id="pulse" title="Flashes on each detected beat"></span><span id="bpm" class="label stats">–</span></span></div>
+      <canvas id="timeline" title="Last 6 s: beat ticks above, chords below"></canvas>
     </div>
   </section>
 
@@ -373,6 +382,66 @@ function drawFrame(an, sr) {
   }
 }
 
+// ---------------------------------------------------------------- beat + timeline
+// The server's causal beat tracker flags frames where a beat falls. Display only: it does
+// not affect recognition (tempo can lock to half-time or the off-beat on some songs).
+const beatState = { beats: [], segs: [], lastT: 0, lastPerf: 0 };
+const LOCK = 0.3;
+function onBeatEvent(e) {
+  const b = beatState, conf = e.beat_conf ?? 0;
+  b.lastT = e.time; b.lastPerf = performance.now();
+  if (e.beat) {
+    b.beats.push({ t: e.time, c: conf });
+    if (conf >= LOCK) { const d = $('pulse'); d.classList.remove('on'); void d.offsetWidth; d.classList.add('on'); }
+  }
+  const last = b.segs[b.segs.length - 1];
+  if (!last || last.name !== e.name) b.segs.push({ t: e.time - 0.04, name: e.name, label: e.label });
+  const cut = e.time - 8;
+  while (b.beats.length && b.beats[0].t < cut) b.beats.shift();
+  while (b.segs.length > 1 && b.segs[1].t < cut) b.segs.shift();
+  $('bpm').textContent = conf >= LOCK && e.bpm ? `${Math.round(e.bpm)} BPM` : 'finding beat…';
+  $('beatrow').classList.toggle('locked', conf >= LOCK);
+}
+function chordColor(label) {
+  const [root, q] = (label || '').split(':');
+  if (!(root in PC)) return css('--chroma-off');
+  return `hsl(${PC[root] * 30} ${q === 'min' ? 45 : 70}% ${q === 'min' ? 45 : 58}%)`;
+}
+function drawTimeline() {
+  const [g, w, h] = fitCanvas($('timeline'));
+  g.clearRect(0, 0, w, h);
+  const b = beatState, span = 6, top = 20;
+  g.fillStyle = css('--chroma-off'); g.globalAlpha = .35; roundRect(g, 0, top, w, h - top, 6); g.fill(); g.globalAlpha = 1;
+  if (!b.lastT) {
+    g.fillStyle = css('--muted'); g.font = '11px system-ui'; g.textAlign = 'center';
+    g.fillText('beats and chords will scroll here', w / 2, top + (h - top) / 2 + 4);
+    return;
+  }
+  const now = b.lastT + Math.min(0.2, (performance.now() - b.lastPerf) / 1000);
+  const X = (t) => w - ((now - t) / span) * w;
+  b.segs.forEach((sg, i) => {
+    const end = i + 1 < b.segs.length ? b.segs[i + 1].t : now;
+    if (end < now - span) return;
+    const x0 = Math.max(0, X(sg.t)), x1 = Math.min(w, X(end));
+    if (x1 - x0 < 1) return;
+    g.fillStyle = chordColor(sg.label); g.globalAlpha = sg.name === 'N.C.' ? .25 : .55;
+    roundRect(g, x0 + 1, top, x1 - x0 - 2, h - top, 6); g.fill(); g.globalAlpha = 1;
+    if (x1 - x0 > 24) {
+      g.fillStyle = css('--fg'); g.font = '700 12px system-ui'; g.textAlign = 'left';
+      g.fillText(sg.name, x0 + 6, top + (h - top) / 2 + 4);
+    }
+  });
+  const accent = css('--accent');
+  b.beats.forEach((bt) => {
+    const x = X(bt.t);
+    if (x < 0) return;
+    g.fillStyle = accent; g.globalAlpha = 0.2 + 0.8 * Math.min(1, bt.c / LOCK);
+    g.fillRect(x - 1, 2, 2, top - 6);
+    g.globalAlpha = 0.25; g.fillRect(x - 0.5, top, 1, h - top);
+  });
+  g.globalAlpha = 1;
+}
+
 // ---------------------------------------------------------------- audio session
 async function start(getStream, label) {
   setButtons(false);
@@ -395,6 +464,7 @@ async function start(getStream, label) {
     if (e.type === 'words') { window.sheet?.onWords(e); return; }
     if (e.type !== 'chord') return;
     window.sheet?.onEvent(e);
+    onBeatEvent(e);
     events++;
     const t0 = sentAt.shift();
     if (t0) $('lat').textContent = `round trip ${(performance.now() - t0).toFixed(0)} ms`;
@@ -420,6 +490,7 @@ async function start(getStream, label) {
   let raf;
   const loop = () => {
     drawFrame(an, ctx.sampleRate);
+    drawTimeline();
     const now = performance.now();
     if (now - rateT > 1000) { $('fps').textContent = `${events} frames/s`; events = 0; rateT = now; }
     raf = requestAnimationFrame(loop);
@@ -436,6 +507,8 @@ async function start(getStream, label) {
     $('lvl').style.clipPath = 'inset(0 100% 0 0)'; $('fps').textContent = ''; $('lat').textContent = '';
     setStatus(msg, kind); session = null; candidate = null;
     chromaSmooth.fill(0); drawFrame(null, 16000);
+    Object.assign(beatState, { beats: [], segs: [], lastT: 0 }); drawTimeline();
+    $('bpm').textContent = '–'; $('beatrow').classList.remove('locked');
   };
   audio[0].onended = () => session && session();
   ws.onclose = () => session && session('Disconnected', 'err');
@@ -444,8 +517,8 @@ async function start(getStream, label) {
 }
 
 $('stop').onclick = () => session && session();
-drawFrame(null, 16000);
-addEventListener('resize', () => { if (!session) drawFrame(null, 16000); });
+drawFrame(null, 16000); drawTimeline();
+addEventListener('resize', () => { if (!session) { drawFrame(null, 16000); drawTimeline(); } });
 
 let unlocked = false;
 async function listInputs() {
