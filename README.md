@@ -20,6 +20,17 @@ mic ─▶ causal CQT (40 ms hop) ─▶ causal CNN ─▶ banded causal Transfo
 | UG "grammar" | Supplies (1) the HMM's chord-change matrix, counted in all 12 keys, and (2) progressions for the synthetic-audio renderer. |
 | Pitch augmentation | Shift CQT bins by ±semitones and transpose the labels, applied to every training crop. |
 
+## Pretrained models
+
+Trained bundles are attached to GitHub Releases, so they don't bloat git history:
+
+```powershell
+gh release download model-v5 --pattern "*.zip" --dir models
+Expand-Archive models/chordstream-v5.zip models; uv run chordstream serve --bundle models/v5
+```
+
+They were trained on copyrighted recordings, so keep them for personal use.
+
 ## Workflow
 
 ```powershell
