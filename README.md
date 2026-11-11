@@ -25,8 +25,8 @@ mic ─▶ causal CQT (40 ms hop) ─▶ causal CNN ─▶ banded causal Transfo
 Trained bundles are attached to GitHub Releases, so they don't bloat git history:
 
 ```powershell
-gh release download model-v5 --pattern "*.zip" --dir models
-Expand-Archive models/chordstream-v5.zip models; uv run chordstream serve --bundle models/v5
+gh release download model-v6 --pattern "*.zip" --dir models
+Expand-Archive models/chordstream-v6.zip models; uv run chordstream serve --bundle models/v6
 ```
 
 They were trained on copyrighted recordings, so keep them for personal use.
@@ -126,9 +126,10 @@ and a GPU recommended.
 
 ## Results
 
-The live model is **v5**: 80.8% frame accuracy (majmin) on 36 clean held-out Billboard songs and
-78.9% on the original 10 (from 73.8% for the first fine-tuned model), at about 2 ms of CPU per
-40 ms frame with zero lookahead. Every experiment, including the ones that didn't help, is in
+The live model is **v6**, with an extended vocabulary (maj, min, 7, maj7, m7, dim, aug, sus2,
+sus4). Majmin accuracy is 80.8% on 36 clean held-out Billboard songs and 79.9% on the original 10
+(from 73.8% for the first fine-tuned model); full-vocabulary accuracy is 70.3%. It uses about
+2.4 ms of CPU per 40 ms frame with zero lookahead. Every experiment, including the ones that didn't help, is in
 **[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)**, with commands and decisions. The batch scripts
 are in [`experiments/`](experiments/).
 

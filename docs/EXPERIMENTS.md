@@ -42,7 +42,8 @@ Comparisons inside one experiment always use the same set. Differences under ~0.
 | bb_ft (first fine-tune) | was live | 73.9% | – | 2.0× | +120 ms | E03–E04 |
 | v2 | was live | 75.5% | 77.0% (19) | 1.9× | +80 ms | E09 |
 | v4 | was live | 78.8% | 80.1% (36 clean) | 1.6× | +80 ms | E15 |
-| **v5** | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v5)) | **78.9%** | **80.8% (36 clean)** | 1.6× | +80 ms | E17 |
+| v5 | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v5)) | 78.9% | 80.8% (36 clean) | 1.6× | +80 ms | E17 |
+| **v6** (extended vocab) | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v6)) | **79.9%** | **80.8% (36 clean)**; 70.3% full vocab | 1.6× | +80 ms | E18 |
 | teacher (offline, sees ±5 s) | never | 82.0% | 82.9% (36 clean) | 1.04× | – | E17 |
 
 Biggest wins: real data (E03, +28 pts over synthetic only), training budget (E13/E15, +2.4),
@@ -173,14 +174,28 @@ Dates are the day the experiment ran.
   power 2), 1.60× changes; original 10: 78.9%. 2 ms/frame.
 - **Decision:** deployed **v5** and published it as release `model-v5`.
 
-### E18 · Extended vocabulary + structured heads · 2026-11-12 — running
+### E18 · Extended vocabulary + structured heads · 2026-11-12 — `models/ext_teacher`, `models/ext_student` → `v6`
 - **Script:** [`experiments/2026-11-12_extended_vocab.ps1`](../experiments/2026-11-12_extended_vocab.ps1)
 - **Setup:** 109 classes (12 roots × maj, min, 7, maj7, m7, dim, aug, sus2, sus4 + N; the first
   25 = majmin); training-only root, bass and 12-note heads (McFee & Bello style); labels re-derived
   from full Billboard annotations with E14's re-timing (`data/cache_ext`); teacher → student as E17.
 - **Data:** chord-type share: maj 64%, min 12%, 7 11%, m7 7%, maj7 3%, sus4 2.5%, dim/sus2/aug < 0.5%.
 - **Success criterion:** majmin view ≥ ~80.5% (no regression vs v5), plus useful accuracy on 7ths/sus.
-- **Result:** pending.
+- **Result (36 clean held-out):** teacher 73.8% full vocabulary. Student (HMM 5 s / power 2):
+
+  | | v5 | ext student |
+  |---|---|---|
+  | majmin view | 80.8% | **80.8%** |
+  | majmin, original 10 | 78.9% | **79.9%** |
+  | full vocabulary | 62.5% (can't output 7ths) | **70.3%** |
+  | changes / lag | 1.60× / +80 ms | 1.61× / +80 ms |
+
+  Per type (share of frames, exact chord, right root): maj 66% 84% 86% · min 10% 56% 73% ·
+  7 9% 44% 86% · m7 8% 52% 75% · maj7 4% 44% 93% · sus4 3% 11% 64% · dim/aug/sus2 < 0.5% ≈0%.
+- **Decision:** no majmin regression and real 7th recognition, so deployed as **v6** (release
+  [`model-v6`](https://github.com/helloparthshah/chordstream/releases/tag/model-v6)). Sus4 is weak and
+  dim/aug/sus2 are too rare to learn from 331 songs. More data for those qualities (or
+  synthetic renders of them) is the lever.
 
 ---
 
@@ -191,6 +206,7 @@ Dates are the day the experiment ran.
 | E19 | Causal harmonic/percussive separation before the CQT | Does suppressing drums help a deep model? | A/B: same recipe, features with and without HPSS (past-only median filter) |
 | E20 | Key-signature input, oracle first | Upper bound of giving the Transformer the key | Inject the true key signature (from annotations) as 12 inputs. Proceed to a causal 60 s note profile only if the oracle gains ≥ 0.5 pt. Most errors are in-key (E07), so expect a small gain |
 | later | Learned beat head | Better beats for E16 (up to +2.7 pts on the sheet) | Multi-task beat output trained on Billboard bar timings |
+| later | Rare chord types (sus, dim, aug) | E18: under 0.5% of frames each, ≈0% recall | Synthetic renders of these qualities mixed into training, or more annotated data |
 | later | More unlabelled audio for distillation | E17 used 299 extra songs; the literature uses 1000+ hours | User library or more fetches |
 
 ## Model directory registry
@@ -199,7 +215,9 @@ Dates are the day the experiment ran.
 |---|---|---|
 | `latest` | E01 | init for all models (keep) |
 | `bb_ft`, `v2`, `v3`, `v4` | E03, E09, E12, E15 | superseded; kept for comparison |
-| `v5` | E17 | **live**, release `model-v5` |
+| `v5` | E17 | previous live model, release `model-v5` |
+| `v6` | E18 | **live**, release `model-v6` |
 | `teacher` | E17 | offline teacher for majmin distillation |
 | `exp_a`, `exp_b`, `exp_w2/3/5`, `exp_g10`, `synth_g10`, `exp_lr3`, `exp_big`, `synth_big`, `v4_clean`, `v4_orig`, `student` | E08–E17 | experiment outputs; safe to delete |
-| `ext_teacher`, `ext_student` | E18 | in progress |
+| `ext_teacher` | E18 | offline teacher for extended-vocabulary distillation |
+| `ext_student` | E18 | same weights as `v6` (before HMM retune); safe to delete |
