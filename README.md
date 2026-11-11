@@ -126,6 +126,8 @@ Measured on 10 held-out Billboard songs (`chordstream.evaluate`), streaming-exac
 | + causal key prior (`key.py`) | ≤ 73.8% | 1.8–1.9× |
 | **v2:** 207 real songs, transition-weighted loss (×3, 0.5 s), HMM power 1.5 | **75.5%** (77.0% on all 19 held-out) | 1.9× |
 | **v4:** 367 cleaned songs, lr 3e-4 × 80 epochs, HMM 5 s / power 1.5 | **78.8%** (80.1% on 36 clean held-out) | 1.6× |
+| **v5:** v4 recipe + distillation from a bidirectional teacher (+299 unlabelled songs), HMM 3 s / power 2 | **78.9%** (80.8% on 36 clean held-out) | 1.6× |
+| *Teacher (bidirectional, sees ±5 s, offline only)* | *82.0%* (82.9%) | *1.04×* |
 
 v2 also improved change timing: change-point F rose from 0.433 to 0.503 and median switching
 lag fell from +120 to +80 ms on all held-out songs. More data alone (207 songs, plain loss)
@@ -142,6 +144,9 @@ Follow-up sweeps on 291 songs, compared on the same 25–37 held-out songs:
   +2.4 points over v3, with change-F 0.606 and +40–80 ms lag. Re-timing drifting labels and
   dropping 27 unfixable songs made no difference to the trained model (80.6% either way), though
   it does make the evaluation more trustworthy.
+- **Cost of zero lookahead:** the bidirectional teacher scores 82.9% vs 80.1–80.8% causal, and its
+  segmentation is nearly exact (1.04× changes, change-F 0.71 vs 0.60). Distilling it into the causal
+  model (`chordstream pseudo-label` + `train --distill-weight`) recovers about +0.7 points.
 - **Data scaling:** 207 → 394 songs (v3) is a tie with v2 (78.3% vs 78.4% on 37 held-out songs).
   v3 also scores only 79% on its *own training songs*, so the model under-fits rather than
   over-fits. More of the same data can't help; capacity, label noise and the causal limit
