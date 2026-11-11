@@ -313,3 +313,33 @@ def test_extended_training_step_runs_and_grows_head(tmp_path):
     sd = torch.load(out / "model.pt")["state_dict"] if (out / "model.pt").exists() else None
     if sd is not None:
         assert sd["head.weight"].shape[0] == N_EXT and "notes_head.weight" in sd
+
+
+def test_hpss_is_causal_and_suppresses_transients():
+    from chordstream.data.variants import hpss_causal
+
+    rng = np.random.default_rng(0)
+    T, F = 60, 144
+    lin = np.full((T, F), 1e-3)
+    lin[:, 40] = 0.5  # sustained note
+    lin[30, :] += 0.5  # drum hit: broadband, one frame
+    feats = np.log1p(100 * lin).astype(np.float32)
+    out = hpss_causal(feats)
+    assert out[30, 40] > 0.8 * feats[30, 40]  # the note survives the hit
+    assert out[30, 100] < 0.5 * feats[30, 100]  # the broadband hit is suppressed
+    f2 = feats.copy()
+    f2[45:] = rng.random((15, F))
+    np.testing.assert_allclose(hpss_causal(f2)[:45], out[:45])  # no lookahead
+
+
+def test_key_input_columns_feed_the_model():
+    torch = pytest.importorskip("torch")
+    from chordstream.config import ModelConfig
+    from chordstream.model import ChordNet
+
+    net = ChordNet(ModelConfig(d_model=32, n_layers=1, context_frames=8, key_input=True)).eval()
+    x = torch.rand(1, 20, 156)
+    x2 = x.clone()
+    x2[..., 144:] = torch.roll(x[..., 144:], 3, -1)
+    with torch.no_grad():
+        assert not torch.allclose(net(x), net(x2))

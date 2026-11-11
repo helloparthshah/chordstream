@@ -197,14 +197,29 @@ Dates are the day the experiment ran.
   dim/aug/sus2 are too rare to learn from 331 songs. More data for those qualities (or
   synthetic renders of them) is the lever.
 
+### E19 · Causal harmonic/percussive separation (HPSS) · 2026-11-12 — running
+- **Script:** [`experiments/2026-11-12_hpss_and_key_input.ps1`](../experiments/2026-11-12_hpss_and_key_input.ps1)
+- **Question:** does suppressing drums before the network help a deep model?
+- **Setup:** `data/variants.hpss_causal`: soft mask H²/(H²+P²) per frame, H = median over the
+  current + 4 previous frames, P = median over 17 neighbouring bins; past frames only. Same recipe
+  as E15's `v4_clean` (baseline: 80.6% raw on 36 clean held-out).
+- **Risk:** the past-only time median may delay new notes; watch lag as well as accuracy.
+- **Result:** pending.
+
+### E20 · Key-signature input, oracle ceiling · 2026-11-12 — running
+- **Question:** how much could the Transformer gain from knowing the key? (Upper bound.)
+- **Setup:** each song's true key signature (from its annotations, via `key.fit_relative_profile`)
+  as 12 extra input columns, projected and added to every frame (`--key-input`); rotated with
+  pitch-shift augmentation. Same recipe and baseline as E19.
+- **Decision rule:** pursue a causal version (decaying 60 s note profile) only if this gains ≥ 0.5 pt.
+- **Result:** pending.
+
 ---
 
 ## Queue
 
 | ID | Experiment | Question | Notes |
 |---|---|---|---|
-| E19 | Causal harmonic/percussive separation before the CQT | Does suppressing drums help a deep model? | A/B: same recipe, features with and without HPSS (past-only median filter) |
-| E20 | Key-signature input, oracle first | Upper bound of giving the Transformer the key | Inject the true key signature (from annotations) as 12 inputs. Proceed to a causal 60 s note profile only if the oracle gains ≥ 0.5 pt. Most errors are in-key (E07), so expect a small gain |
 | later | Learned beat head | Better beats for E16 (up to +2.7 pts on the sheet) | Multi-task beat output trained on Billboard bar timings |
 | later | Rare chord types (sus, dim, aug) | E18: under 0.5% of frames each, ≈0% recall | Synthetic renders of these qualities mixed into training, or more annotated data |
 | later | More unlabelled audio for distillation | E17 used 299 extra songs; the literature uses 1000+ hours | User library or more fetches |

@@ -114,6 +114,8 @@ class ChordNet(nn.Module):
         self.blocks = nn.ModuleList(Block(cfg) for _ in range(cfg.n_layers))
         self.ln_f = nn.LayerNorm(cfg.d_model)
         self.head = nn.Linear(cfg.d_model, cfg.n_classes)
+        if cfg.key_input:
+            self.key_proj = nn.Linear(12, cfg.d_model)
         if cfg.structured:
             self.root_head = nn.Linear(cfg.d_model, 13)  # 12 pitch classes + "no chord"
             self.bass_head = nn.Linear(cfg.d_model, 13)
@@ -132,8 +134,12 @@ class ChordNet(nn.Module):
 
     def embed(self, x: torch.Tensor) -> torch.Tensor:
         B, T, _ = x.shape
-        h = self.cnn(x[:, None])  # (B, C, T, F')
-        return self.proj(h.permute(0, 2, 1, 3).reshape(B, T, -1))
+        nb = self.cfg.n_bins
+        h = self.cnn(x[:, None, :, :nb])  # (B, C, T, F')
+        h = self.proj(h.permute(0, 2, 1, 3).reshape(B, T, -1))
+        if self.cfg.key_input:  # columns after the CQT bins: key-signature vector (E20)
+            h = h + self.key_proj(x[:, :, nb : nb + 12])
+        return h
 
     def features(self, x: torch.Tensor) -> torch.Tensor:
         h = self.embed(x)

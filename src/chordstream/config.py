@@ -45,6 +45,9 @@ class ModelConfig:
     # Extra training-only heads (McFee & Bello-style structured outputs): root, bass, 12 notes.
     # They let rare/out-of-vocabulary chords still teach the shared layers. Not exported.
     structured: bool = False
+    # E20 experiment: 12 extra input columns after the CQT bins carry a key-signature vector,
+    # projected and added to every frame's embedding.
+    key_input: bool = False
 
 
 @dataclass

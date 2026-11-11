@@ -169,6 +169,7 @@ def train(
         if model_cfg is not None:  # vocabulary/heads may change on top of an init; architecture may not
             bundle.model.n_classes = model_cfg.n_classes
             bundle.model.structured = model_cfg.structured
+            bundle.model.key_input = model_cfg.key_input
     else:
         bundle = BundleConfig(frontend_cfg or FrontendConfig(), model_cfg or ModelConfig())
     if bidirectional:  # offline teacher (weights from a causal init transfer: same shapes)
