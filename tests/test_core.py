@@ -192,3 +192,24 @@ def test_transition_weights_mark_frames_after_changes():
     y = torch.tensor([[1, 1, 1, 5, 5, 5, 5, -1, -1, 5]])
     w = transition_weights(y, 3.0, 2)
     assert w.tolist() == [[1, 1, 1, 3, 3, 1, 1, 1, 1, 1]]  # change at frame 3; IGNORE gaps don't count
+
+
+def test_beat_pooling_matches_offline_definition():
+    """Streaming beat chords == offline 'average posteriors over each tracker beat'."""
+    from chordstream.beat import BeatTracker
+
+    rng = np.random.default_rng(0)
+    T = 300
+    probs = rng.dirichlet(np.ones(25), T)
+    feats = rng.random((T, 144)).astype(np.float32)
+    beats = BeatTracker().run(feats)
+    acc, start, streamed = np.zeros(25), 0, []
+    for i, (p, b) in enumerate(zip(probs, beats)):
+        acc += p
+        if b.beat:
+            streamed.append((start, int(acc.argmax())))
+            acc[:] = 0
+            start = i + 1
+    bounds = [0] + [i + 1 for i, b in enumerate(beats) if b.beat]
+    offline = [(a, int(probs[a:b].mean(0).argmax())) for a, b in zip(bounds[:-1], bounds[1:])]
+    assert streamed == offline

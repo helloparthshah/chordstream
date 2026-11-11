@@ -240,8 +240,9 @@ const AUDIO = { echoCancellation: false, noiseSuppression: false, autoGainContro
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
 let session = null, lastName = null, chordTones = new Set(), rootPc = -1, spelled = {};
-let candidate = null, candStart = 0;
-const HOLD_S = 0.32;  // a chord must last this long to enter the progression strip
+// The progression strip, chord sheet and diagram follow the server's per-beat chords
+// (posteriors averaged over each beat, reported when the beat ends): one beat late, but
+// more accurate and far less flickery than per-frame decisions. The big display stays instant.
 
 // Spell triad tones by letter (E major -> E G♯ B, not E A♭ B).
 const LETTERS = 'CDEFGAB', NAT = [0, 2, 4, 5, 7, 9, 11];
@@ -280,20 +281,21 @@ function showChord(e) {
   const pct = Math.round(e.confidence * 100);
   $('confbar').style.width = `${pct}%`;
   $('confpct').textContent = `${pct}%`;
-  if (e.name !== candidate) { candidate = e.name; candStart = e.time - 0.04; }
-  if (candidate !== lastName && e.time - candStart >= HOLD_S) {
-    lastName = candidate;
-    $('diagram').innerHTML = window.chordDiagram ? window.chordDiagram(e.label) : '';
-    window.sheet?.addChord(candidate, e.label, e.time - candStart);
-    const hist = $('hist');
-    hist.querySelector('.empty')?.remove();
-    const chip = document.createElement('span');
-    chip.className = 'chip';
-    chip.append(e.name);
-    const small = document.createElement('small'); small.textContent = fmtTime(candStart); chip.append(small);
-    hist.append(chip);
-    while (hist.children.length > 40) hist.firstChild.remove();
-  }
+  if (e.beat_label && e.beat_name !== lastName) commitBeatChord(e);
+}
+
+function commitBeatChord(e) {
+  lastName = e.beat_name;
+  $('diagram').innerHTML = window.chordDiagram ? window.chordDiagram(e.beat_label) : '';
+  window.sheet?.addChord(e.beat_name, e.beat_label, e.time - e.beat_t0);
+  const hist = $('hist');
+  hist.querySelector('.empty')?.remove();
+  const chip = document.createElement('span');
+  chip.className = 'chip';
+  chip.append(e.beat_name);
+  const small = document.createElement('small'); small.textContent = fmtTime(e.beat_t0); chip.append(small);
+  hist.append(chip);
+  while (hist.children.length > 40) hist.firstChild.remove();
 }
 
 // ---------------------------------------------------------------- visualizer
@@ -510,7 +512,7 @@ async function start(getStream, label) {
     setButtons(true);
     $('sig').textContent = 'No input'; $('sig').className = 'none';
     $('lvl').style.clipPath = 'inset(0 100% 0 0)'; $('fps').textContent = ''; $('lat').textContent = '';
-    setStatus(msg, kind); session = null; candidate = null;
+    setStatus(msg, kind); session = null; lastName = null;
     chromaSmooth.fill(0); drawFrame(null, 16000);
     Object.assign(beatState, { beats: [], segs: [], lastT: 0 }); drawTimeline();
     $('bpm').textContent = '–'; $('beatrow').classList.remove('locked');
