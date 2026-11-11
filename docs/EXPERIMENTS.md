@@ -8,6 +8,11 @@ use are published as [GitHub Releases](https://github.com/helloparthshah/chordst
 **New experiments:** add an entry under [Queue](#queue) before running, then move it into the
 log with its result. One entry per question; record the decision even when the answer is "no gain".
 
+**Policy (from 2026-11-12): no distillation in training.** New models train on human labels only, so
+results reflect the method itself rather than inheriting a teacher's errors. The bidirectional teacher
+is kept only as a measuring stick (the cost of zero lookahead). E17/E18's distilled models stay
+documented, but new baselines are the non-distilled ones (`v4_clean`, E24).
+
 ## How results are measured
 
 All numbers come from `chordstream evaluate` (or the same functions in `chordstream.evaluate`).
@@ -240,16 +245,23 @@ Dates are the day the experiment ran.
 
 ### E22 · Zero-lookahead anti-flutter training · 2026-11-12 — queued (runs after E20)
 - **Script:** [`experiments/2026-11-12_anti_flutter.ps1`](../experiments/2026-11-12_anti_flutter.ps1)
-- **Setup:** v5's recipe and data (`data/cache_distill`), compared with `models/student`.
-  **E22a** `--stability-weight 2`: squared change of the predicted distribution between consecutive
-  frames, counted only where the true chord is constant. **E22b** `--distill-weight 3` (v5 used 1).
+- **Setup:** human labels only, E15's recipe and data (`data/cache_bb_fix`), compared with `models/v4_clean`
+  (80.6% raw). **E22a** `--stability-weight 2`: squared change of the predicted distribution between
+  consecutive frames, counted only where the true chord is constant. (E22b, harder distillation, was
+  dropped under the no-distillation policy.)
 - **Result:** pending.
 
 ### E23 · Small lookahead via label delay (120 / 240 ms) · 2026-11-12 — queued (runs after E22)
 - **Setup:** `--label-delay 3` / `6`: the causal network is trained so that output t names the chord
   of frame t − d, giving each decision d frames of "future" context with no architecture change (the
   KV-cached ONNX step is unchanged; the display is d × 40 ms late). `predict_song` realigns outputs,
-  so the metrics score the frames being described. Same recipe and baseline as E22.
+  so the metrics score the frames being described. Human labels only; same recipe and baseline as E22.
+- **Result:** pending.
+
+### E24 · Extended vocabulary without distillation · 2026-11-12 — queued (runs after E23)
+- **Setup:** E18's data and heads (`data/cache_ext`, `--vocab extended`) with E15's recipe, human labels
+  only. Compared with v6 (the distilled extended model) in both majmin and full-vocabulary views.
+- **Purpose:** a non-distilled replacement for v6, and a measure of what distillation contributed to it.
 - **Result:** pending.
 
 ---
@@ -258,7 +270,7 @@ Dates are the day the experiment ran.
 
 | ID | Experiment | Question | Notes |
 |---|---|---|---|
-| E21 | Bollywood domain adaptation | All 394 labelled songs are US Billboard hits (1958–1991); no Bollywood | Unlabelled Bollywood audio (a few hundred songs) pseudo-labelled by the teacher, as in E17; measure on ~20 songs with Ultimate Guitar chord sheets (sequence agreement, untimed). First probe: *Raat Bhar* (Heropanti) with v6 vs its UG sheet (E, B, C♯m, A, D): key **matches** (E major); 93% of time on the sheet's chords (extra: G♯m 6%); 88% of the sheet's 75 changes found in order; over-segmented 136 vs 75 changes, mostly A↔C♯m and C♯m↔B wavering. Use this scoring (key, time-in-sheet, sequence coverage) for the Bollywood test set. **Timed labels idea:** UG sheets put chords over words and LRCLIB + Whisper time the words, so sheet + lyrics give approximately timed human chord labels for sung sections; use them as a timed test set and to check/correct teacher pseudo-labels. Note: training-label sync is checked against audio (fetch-time alignment, E14 audit), never lyrics; pseudo-labels are aligned by construction |
+| E21 | Bollywood domain adaptation | All 394 labelled songs are US Billboard hits (1958–1991); no Bollywood | Human labels only (no-distillation policy): UG chord sheets anchored to timed lyrics (LRCLIB + Whisper) as approximately timed labels for sung sections, for both training and a timed test set; untimed sheet comparison as a fallback. First probe: *Raat Bhar* (Heropanti) with v6 vs its UG sheet (E, B, C♯m, A, D): key **matches** (E major); 93% of time on the sheet's chords (extra: G♯m 6%); 88% of the sheet's 75 changes found in order; over-segmented 136 vs 75 changes, mostly A↔C♯m and C♯m↔B wavering. Use this scoring (key, time-in-sheet, sequence coverage) for the Bollywood test set. **Timed labels idea:** UG sheets put chords over words and LRCLIB + Whisper time the words, so sheet + lyrics give approximately timed human chord labels for sung sections; use them as a timed test set and to check/correct teacher pseudo-labels. Note: training-label sync is checked against audio (fetch-time alignment, E14 audit), never lyrics; pseudo-labels are aligned by construction |
 | later | Seed repeats for v4 vs v5 | Is the distillation gain robust to training randomness? | Retrain both with a second seed (~40 min) |
 | later | Key-aware chord spelling | Names use one fixed spelling (A♭m instead of G♯m in E major) | Display only |
 | later | Learned beat head | Better beats for E16 (up to +2.7 pts on the sheet) | Multi-task beat output trained on Billboard bar timings |
