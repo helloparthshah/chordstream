@@ -66,7 +66,8 @@ def cmd_train(a):
 
     mcfg = ModelConfig(context_frames=a.context, d_model=a.d_model, n_layers=a.layers)
     train(a.cache, a.out, a.epochs, a.batch_size, a.lr, a.crops, a.init, a.progressions, a.holdout_prefix,
-          a.workers, a.device, mcfg, a.transition_weight, a.transition_window, a.seed, FrontendConfig(gamma=a.gamma))
+          a.workers, a.device, mcfg, a.transition_weight, a.transition_window, a.seed, FrontendConfig(gamma=a.gamma),
+          a.eval_every)
 
 
 def cmd_export(a):
@@ -257,6 +258,7 @@ def main(argv=None):
     s.add_argument("--transition-weight", type=float, default=1.0, help="loss weight just after chord changes")
     s.add_argument("--transition-window", type=float, default=0.5, help="seconds after a change to up-weight")
     s.add_argument("--seed", type=int, default=0)
+    s.add_argument("--eval-every", type=int, default=1, help="score held-out songs every N epochs (and the last)")
     s.add_argument("--gamma", type=float, default=FrontendConfig.gamma, help="frontend gamma (fresh models only; "
                    "must match the --gamma the cache was built with)")
     s.set_defaults(fn=cmd_train)

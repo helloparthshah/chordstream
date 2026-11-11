@@ -131,6 +131,15 @@ lag fell from +120 to +80 ms on all held-out songs. More data alone (207 songs, 
 reaches the same accuracy but keeps the +120 ms lag. Reproduce with
 `chordstream train --transition-weight 3` and `chordstream evaluate models/<bundle>`.
 
+Follow-up sweeps on 291 songs, compared on the same 25–37 held-out songs:
+- **Transition weight:** 2 and 3 are within noise of each other (80.4% vs 80.1%), and 5 is
+  slightly worse. Weight 3 gives the lowest lag (+40 ms).
+- **Faster frontend** (`--gamma 10`, low-frequency windows 0.2 s → 0.08 s): 1 point *less*
+  accurate (77.9% vs 78.8%), with lower change-F (0.499 vs 0.520) and no lag gain. Rejected,
+  because blurred bass costs more than the shorter window saves.
+- **Data scaling:** going from 207 to 291 songs added only about +0.5 points, so the current
+  model and frontend are close to saturating on this data.
+
 Error analysis:
 - **Late switches:** 46% of errors are the previous chord still showing after a true change.
 - **Near changes:** 43% of errors fall within 0.4 s of a change.

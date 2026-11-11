@@ -126,6 +126,7 @@ def train(
     transition_window_s: float = 0.5,
     seed: int | None = 0,
     frontend_cfg: FrontendConfig | None = None,
+    eval_every: int = 1,
 ) -> Path:
     if seed is not None:
         torch.manual_seed(seed)
@@ -185,6 +186,9 @@ def train(
             sched.step()
             tot, n = tot + loss.item(), n + 1
         msg = f"epoch {ep:3d}  loss {tot / max(1, n):.4f}  {time.time() - t0:.0f}s"
+        if val_files and ep % eval_every and ep != epochs:  # scoring every song is slower than training
+            print(msg, flush=True)
+            continue
         if val_files:
             m = evaluate(net, val_files, dev, hmms)
             best_hmm = int(np.argmax(m["hmm_accs"]))
