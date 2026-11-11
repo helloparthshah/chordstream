@@ -67,7 +67,7 @@ def cmd_train(a):
     mcfg = ModelConfig(context_frames=a.context, d_model=a.d_model, n_layers=a.layers)
     train(a.cache, a.out, a.epochs, a.batch_size, a.lr, a.crops, a.init, a.progressions, a.holdout_prefix,
           a.workers, a.device, mcfg, a.transition_weight, a.transition_window, a.seed, FrontendConfig(gamma=a.gamma),
-          a.eval_every)
+          a.eval_every, a.bidirectional, a.distill_weight)
 
 
 def cmd_export(a):
@@ -130,6 +130,12 @@ def cmd_audit(a):
     print(f"audited {len(rows)} songs -> {a.out}; largest drift:")
     for r in worst:
         print(f"  {r['drift_s']:.2f}s  {r['artist'][:24]} - {r['title'][:32]}")
+
+
+def cmd_pseudo_label(a):
+    from .distill import pseudo_label
+
+    print(pseudo_label(a.teacher, a.labelled, a.out, a.unlabelled_audio, a.unlabelled_cache))
 
 
 def cmd_serve(a):
@@ -269,6 +275,8 @@ def main(argv=None):
     s.add_argument("--transition-window", type=float, default=0.5, help="seconds after a change to up-weight")
     s.add_argument("--seed", type=int, default=0)
     s.add_argument("--eval-every", type=int, default=1, help="score held-out songs every N epochs (and the last)")
+    s.add_argument("--bidirectional", action="store_true", help="train an offline teacher (sees future audio)")
+    s.add_argument("--distill-weight", type=float, default=1.0, help="weight of the teacher-posterior loss")
     s.add_argument("--gamma", type=float, default=FrontendConfig.gamma, help="frontend gamma (fresh models only; "
                    "must match the --gamma the cache was built with)")
     s.set_defaults(fn=cmd_train)
@@ -283,6 +291,15 @@ def main(argv=None):
     s.add_argument("--out", default="data/audit.csv")
     s.add_argument("--bundle", help="optional model bundle for per-song agreement")
     s.set_defaults(fn=cmd_audit)
+
+    s = sp.add_parser("pseudo-label", help="write teacher posteriors (soft targets) for distillation")
+    s.add_argument("--teacher", required=True, help="bundle trained with --bidirectional")
+    s.add_argument("--labelled", default="data/cache_bb_fix")
+    s.add_argument("--out", default="data/cache_distill")
+    s.add_argument("--unlabelled-audio", nargs="*", default=["data/billboard/_rejected"])
+    s.add_argument("--unlabelled-cache", nargs="*", default=["data/cache_bb"],
+                   help="caches whose songs not in --labelled are added without labels")
+    s.set_defaults(fn=cmd_pseudo_label)
 
     s = sp.add_parser("export", help="export bundle to ONNX (+ parity check)")
     s.add_argument("bundle", nargs="?", default="models/latest")

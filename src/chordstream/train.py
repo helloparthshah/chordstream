@@ -40,7 +40,8 @@ def transition_weights(y: torch.Tensor, weight: float, window: int) -> torch.Ten
 def _collate(batch):
     x = torch.from_numpy(np.stack([b[0] for b in batch]))
     y = torch.from_numpy(np.stack([b[1] for b in batch]))
-    return x, y
+    q = torch.from_numpy(np.stack([b[2] for b in batch]))
+    return x, y, q
 
 
 @torch.no_grad()
@@ -52,6 +53,17 @@ def predict_song(net: ChordNet, feats: np.ndarray, device, chunk: int = 1024) ->
     """
     net.eval()
     ctx = net.cfg.n_layers * net.cfg.context_frames + 16
+    if net.cfg.bidirectional:  # needs context on both sides: keep only each chunk's centre
+        chunk = max(chunk, 4 * ctx)
+        x = torch.from_numpy(feats.astype(np.float32)).to(device)
+        T = len(feats)
+        probs = np.zeros((T, N_CLASSES), np.float32)
+        step = chunk - 2 * ctx
+        for s in range(0, T, step):
+            a, e = max(0, s - ctx), min(T, s + step + ctx)
+            p = torch.softmax(net(x[None, a:e]).float(), -1)[0].cpu().numpy()
+            probs[s : min(T, s + step)] = p[s - a : s - a + min(step, T - s)]
+        return probs
     chunk = max(chunk, 2 * ctx)
     x = torch.from_numpy(feats.astype(np.float32)).to(device)
     T = len(feats)
@@ -127,6 +139,8 @@ def train(
     seed: int | None = 0,
     frontend_cfg: FrontendConfig | None = None,
     eval_every: int = 1,
+    bidirectional: bool = False,
+    distill_weight: float = 1.0,
 ) -> Path:
     if seed is not None:
         torch.manual_seed(seed)
@@ -139,6 +153,8 @@ def train(
         bundle = BundleConfig.load(Path(init) / "config.json")
     else:
         bundle = BundleConfig(frontend_cfg or FrontendConfig(), model_cfg or ModelConfig())
+    if bidirectional:  # offline teacher (weights from a causal init transfer: same shapes)
+        bundle.model.bidirectional = True
     bundle.save(out_dir / "config.json")
     mcfg, fcfg = bundle.model, bundle.frontend
     crop = 2 * mcfg.context_frames  # > window so the banded mask is exercised
@@ -167,8 +183,8 @@ def train(
     for ep in range(1, epochs + 1):
         net.train()
         t0, tot, n = time.time(), 0.0, 0
-        for x, y in dl:
-            x, y = x.to(dev, non_blocking=True), y.to(dev, non_blocking=True)
+        for x, y, q in dl:
+            x, y, q = x.to(dev, non_blocking=True), y.to(dev, non_blocking=True), q.to(dev, non_blocking=True)
             y[:, :WARMUP_CONTEXT] = IGNORE
             with torch.autocast(dev.type, dtype=torch.float16, enabled=use_amp):
                 logits = net(x)
@@ -177,6 +193,14 @@ def train(
             w = transition_weights(y, transition_weight, round(transition_window_s / fcfg.frame_seconds)).reshape(-1)
             w = w * (y.reshape(-1) != IGNORE)
             loss = (ce * w).sum() / w.sum().clamp_min(1.0)
+            # Distillation: match the offline teacher's posteriors where they exist
+            # (unlabelled songs have only these; labelled songs get both).
+            has_q = q.sum(-1) > 0
+            has_q[:, :WARMUP_CONTEXT] = False
+            if distill_weight > 0 and has_q.any():
+                logp = F.log_softmax(logits.float(), -1)
+                kl = (q * (torch.log(q.clamp_min(1e-8)) - logp)).sum(-1)
+                loss = loss + distill_weight * kl[has_q].mean()
             opt.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
             scaler.unscale_(opt)

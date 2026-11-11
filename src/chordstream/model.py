@@ -25,9 +25,11 @@ from .config import ModelConfig
 
 
 class CausalConvBlock(nn.Module):
-    def __init__(self, cin: int, cout: int, t_kernel: int = 3, f_kernel: int = 5):
+    def __init__(self, cin: int, cout: int, t_kernel: int = 3, f_kernel: int = 5, centered: bool = False):
         super().__init__()
         self.t_pad = t_kernel - 1
+        # Causal: all padding on the past side. Centred (offline teacher): split evenly.
+        self.pads = (self.t_pad // 2, self.t_pad - self.t_pad // 2) if centered else (self.t_pad, 0)
         self.conv1 = nn.Conv2d(cin, cout, (t_kernel, f_kernel), padding=(0, f_kernel // 2))
         self.bn1 = nn.BatchNorm2d(cout)
         self.conv2 = nn.Conv2d(cout, cout, (t_kernel, f_kernel), padding=(0, f_kernel // 2))
@@ -36,8 +38,8 @@ class CausalConvBlock(nn.Module):
         self.pool = nn.MaxPool2d((1, 2))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:  # (B, C, T, F)
-        h = F.gelu(self.bn1(self.conv1(F.pad(x, (0, 0, self.t_pad, 0)))))
-        h = self.bn2(self.conv2(F.pad(h, (0, 0, self.t_pad, 0))))
+        h = F.gelu(self.bn1(self.conv1(F.pad(x, (0, 0, *self.pads)))))
+        h = self.bn2(self.conv2(F.pad(h, (0, 0, *self.pads))))
         return self.pool(F.gelu(h + self.skip(x)))
 
 
@@ -105,7 +107,7 @@ class ChordNet(nn.Module):
         self.cfg = cfg
         blocks, cin, f = [], 1, cfg.n_bins
         for c in cfg.cnn_channels:
-            blocks.append(CausalConvBlock(cin, c))
+            blocks.append(CausalConvBlock(cin, c, centered=cfg.bidirectional))
             cin, f = c, f // 2
         self.cnn = nn.Sequential(*blocks)
         self.proj = nn.Sequential(nn.Linear(cin * f, cfg.d_model), nn.LayerNorm(cfg.d_model), nn.Dropout(cfg.dropout))
@@ -117,6 +119,9 @@ class ChordNet(nn.Module):
     def attn_bias(self, T: int, device) -> torch.Tensor:
         pos = torch.arange(T, device=device)
         dist = (pos[:, None] - pos[None, :]).float()  # i - j, >= 0 for the past
+        if self.cfg.bidirectional:  # offline teacher: symmetric band, distance in both directions
+            bias = -self.slopes.to(device)[:, None, None] * dist.abs()
+            return bias.masked_fill(dist.abs() >= self.cfg.context_frames, float("-inf"))[None]
         bias = -self.slopes.to(device)[:, None, None] * dist  # (H, T, T)
         outside = (dist < 0) | (dist >= self.cfg.context_frames)
         return bias.masked_fill(outside, float("-inf"))[None]

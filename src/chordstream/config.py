@@ -39,6 +39,9 @@ class ModelConfig:
     ff_mult: int = 4
     dropout: float = 0.1
     context_frames: int = 128  # ~5.1 s of attention history used at inference
+    # Offline teacher only: attend +-context_frames and use centred convolutions. Never
+    # exported for streaming (it needs future audio); used to pseudo-label for distillation.
+    bidirectional: bool = False
 
 
 @dataclass

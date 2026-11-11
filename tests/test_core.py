@@ -213,3 +213,38 @@ def test_beat_pooling_matches_offline_definition():
     bounds = [0] + [i + 1 for i, b in enumerate(beats) if b.beat]
     offline = [(a, int(probs[a:b].mean(0).argmax())) for a, b in zip(bounds[:-1], bounds[1:])]
     assert streamed == offline
+
+
+def test_bidirectional_teacher_sees_future_and_chunking_is_exact():
+    torch = pytest.importorskip("torch")
+    from chordstream.config import ModelConfig
+    from chordstream.model import ChordNet
+    from chordstream.train import predict_song
+
+    cfg = ModelConfig(d_model=32, n_layers=1, n_heads=4, context_frames=8, bidirectional=True)
+    torch.manual_seed(0)
+    net = ChordNet(cfg).eval()
+    x = torch.rand(1, 40, 144)
+    x2 = x.clone()
+    x2[:, 25:] = torch.rand(1, 15, 144)
+    with torch.no_grad():
+        assert not torch.allclose(net(x)[:, 20], net(x2)[:, 20])  # frame 20 depends on the future
+    feats = np.random.default_rng(0).random((300, 144)).astype(np.float32)
+    with torch.no_grad():
+        full = torch.softmax(net(torch.from_numpy(feats)[None]), -1)[0].numpy()
+    np.testing.assert_allclose(predict_song(net, feats, "cpu", chunk=64), full, atol=1e-5)
+
+
+def test_soft_targets_follow_pitch_shift(tmp_path):
+    from chordstream.data.dataset import CropDataset
+    from chordstream.vocab import CLASS_NAMES
+
+    T = 300
+    labels = np.full(T, CLASS_NAMES.index("C:maj"), np.int16)
+    soft = np.zeros((T, 25), np.float16)
+    soft[:, CLASS_NAMES.index("C:maj")] = 1.0
+    np.savez(tmp_path / "s.npz", feats=np.random.rand(T, 144).astype(np.float16), labels=labels, soft=soft)
+    ds = CropDataset([tmp_path / "s.npz"], 256, 2, augment=True, crops_per_epoch=20)
+    for i in range(20):
+        x, y, q = ds[i]
+        assert (q.argmax(1)[y >= 0] == y[y >= 0]).all()  # soft mass moves with the label
