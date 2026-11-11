@@ -26,11 +26,16 @@
     anchors: new Map(),      // lineIdx -> Map(wordIdx -> playback time)
     res: [],                 // recent line-start residuals for auto offset
     auto: true, asr: null,
+    local: null,             // playing a local file: {name, time(), playing(), duration()}
   };
   const RATE = 0.085;        // fallback singing speed, seconds per character
 
   // ------------------------------------------------------------ clocks
   function playbackTime(at = performance.now()) {
+    if (st.local) {  // local file: the <audio> element's own clock (exact, follows seeks)
+      const t = st.local.time();
+      return st.local.playing() ? t + (at - performance.now()) / 1000 : t;
+    }
     const np = st.np;
     if (np && np.has_timeline && np.position != null) return np.position + (np.playing ? (at - st.npAt) / 1000 : 0);
     if (st.anchor) return st.anchor.pos + (at - st.anchor.perf) / 1000;
@@ -46,6 +51,7 @@
 
   // ------------------------------------------------------------ now playing + lyrics
   async function poll() {
+    if (st.local) { renderHeader(); return; }  // a local file overrides the OS media session
     try {
       const np = await (await fetch('/api/nowplaying')).json();
       st.np = np; st.npAt = performance.now();
@@ -82,6 +88,7 @@
 
   // ------------------------------------------------------------ chords in
   function addChord(name, label, ageSeconds) {
+    if (st.local && !st.local.playing()) return;  // paused: the engine only hears silence
     const pt = playbackTime();
     if (pt == null) return;
     const t = pt - ageSeconds - LAG;
@@ -333,6 +340,14 @@
   // ------------------------------------------------------------ header + controls
   function fmt(t) { if (t == null) return '–'; const s = Math.max(0, t); return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`; }
   function renderHeader() {
+    if (st.local) {
+      $('songtitle').textContent = st.meta ? st.meta.title : st.local.name;
+      $('songartist').textContent = st.meta ? st.meta.artist : '';
+      const d = st.local.duration();
+      $('songsync').textContent = `${st.local.playing() ? 'Playing' : 'Paused'} local file · ${fmt(playbackTime())} / ${fmt(Number.isFinite(d) ? d : null)}`;
+      renderSource();
+      return;
+    }
     const np = st.np;
     const title = st.meta ? st.meta.title : (np && np.reason) || 'Nothing playing';
     $('songtitle').textContent = title || 'Nothing playing';
@@ -344,6 +359,9 @@
     else if (np && np.available) sync = `${appName(np.app)} doesn't report position. Click the line being sung to sync`;
     else sync = np && np.reason ? np.reason : '';
     $('songsync').textContent = sync;
+    renderSource();
+  }
+  function renderSource() {
     const src = st.meta && st.meta.lyricsTitle ? `Lyrics: LRCLIB (${st.meta.lyricsTitle})` : '';
     let vs = '';
     if (st.asr && st.asr.enabled) {
@@ -471,7 +489,21 @@
   };
 
   // ------------------------------------------------------------ boot
-  window.sheet = { addChord, onWords, onEvent, attachSocket, debug: () => st };
+  // Local file: "Artist - Title.mp3" -> lyrics lookup; the player drives the clock.
+  function setLocal(src) {
+    st.local = src;
+    st.key = null;  // forget the OS song; the next poll picks it up again after the file stops
+    if (!src) { renderHeader(); return; }
+    const base = src.name.replace(/\.[^.]+$/, '').replace(/_+/g, ' ').replace(/^\d+[\s.-]+/, '').trim();
+    const [a, ...rest] = base.split(/\s+[-–—]\s+/);
+    const meta = rest.length ? { artist: a.trim(), title: rest.join(' - ').trim() } : { artist: '', title: base };
+    const go = () => {
+      const d = src.duration();
+      newSong(`local|${src.name}`, { ...meta, duration: Number.isFinite(d) ? d : null });
+    };
+    Number.isFinite(src.duration()) ? go() : setTimeout(go, 400);  // give the player a moment to read the duration
+  }
+  window.sheet = { addChord, onWords, onEvent, attachSocket, setLocal, debug: () => st };
   bindControls();
   poll();
   const pollAsr = async () => { try { st.asr = await (await fetch('/api/asr')).json(); renderHeader(); } catch {} };

@@ -41,7 +41,10 @@
   button:disabled { opacity: .45; cursor: default; }
   #stop { display: none; background: var(--bad); color: #fff; border-color: transparent; }
   .live-mode #stop { display: inline-block; }
-  .live-mode #mic, .live-mode #sys, .live-mode #dev { display: none; }
+  .live-mode #mic, .live-mode #sys, .live-mode #dev, .live-mode #filebtn { display: none; }
+  #playerrow { flex: 1 1 320px; min-width: 0; display: none; }
+  .file-mode #playerrow { display: block; }
+  #playerrow audio { width: 100%; height: 40px; }
 
   .stage { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; margin-top: 16px; }
   @media (max-width: 760px) { .stage { grid-template-columns: 1fr; } }
@@ -147,6 +150,9 @@
     <select id="dev" aria-label="Input device"><option value="">Default input</option></select>
     <button id="mic" class="primary">Listen</button>
     <button id="sys" title="Chrome / Edge: share a tab or the entire screen with audio">System audio</button>
+    <button id="filebtn" title="Play an audio file from this device with live chords">Play file</button>
+    <input id="file" type="file" accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus" hidden>
+    <div id="playerrow"></div>
     <button id="stop">Stop</button>
   </section>
 
@@ -220,13 +226,19 @@
 <script>
 const worklet = `
 class Tap extends AudioWorkletProcessor {
-  constructor() { super(); this.buf = new Float32Array(640); this.n = 0; }
+  constructor(o) {
+    super();
+    this.ratio = ((o.processorOptions && o.processorOptions.inRate) || 16000) / 16000;
+    this.buf = new Float32Array(640); this.n = 0; this.acc = 0; this.cnt = 0; this.pos = 0;
+  }
+  emit(v) { this.buf[this.n++] = v; if (this.n === 640) { this.port.postMessage(this.buf.slice(0)); this.n = 0; } }
   process(inputs) {
     const ch = inputs[0][0];
     if (!ch) return true;
     for (let i = 0; i < ch.length; i++) {
-      this.buf[this.n++] = ch[i];
-      if (this.n === 640) { this.port.postMessage(this.buf.slice(0)); this.n = 0; }
+      if (this.ratio === 1) { this.emit(ch[i]); continue; }
+      this.acc += ch[i]; this.cnt++; this.pos += 1;  // average each 1/16000 s slot
+      if (this.pos >= this.ratio) { this.pos -= this.ratio; this.emit(this.acc / this.cnt); this.acc = 0; this.cnt = 0; }
     }
     return true;
   }
@@ -447,17 +459,22 @@ function drawTimeline() {
 }
 
 // ---------------------------------------------------------------- audio session
-async function start(getStream, label) {
+// source: a function returning a MediaStream (mic / screen share), or a File to play.
+async function start(source, label) {
   setButtons(false);
-  let stream;
-  try { stream = await getStream(); }
-  catch (err) { setStatus(`Cancelled (${err.name})`, 'err'); setButtons(true); return; }
-  const audio = stream.getAudioTracks();
-  if (!audio.length) {
-    stream.getTracks().forEach((t) => t.stop());
-    setStatus('Share had no audio: tick "Share audio"', 'err'); setButtons(true); return;
+  const file = source instanceof File ? source : null;
+  let stream = null, audio = [];
+  if (!file) {
+    try { stream = await source(); }
+    catch (err) { setStatus(`Cancelled (${err.name})`, 'err'); setButtons(true); return; }
+    audio = stream.getAudioTracks();
+    if (!audio.length) {
+      stream.getTracks().forEach((t) => t.stop());
+      setStatus('Share had no audio: tick "Share audio"', 'err'); setButtons(true); return;
+    }
+    stream.getVideoTracks().forEach((t) => t.stop());  // only the sound is needed
   }
-  stream.getVideoTracks().forEach((t) => t.stop());  // only the sound is needed
+  const stopStream = () => stream && stream.getTracks().forEach((t) => t.stop());
 
   const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
   ws.binaryType = 'arraybuffer';
@@ -475,21 +492,45 @@ async function start(getStream, label) {
     showChord(e);
   };
   const opened = await new Promise((r) => { ws.onopen = () => r(true); ws.onerror = () => r(false); });
-  if (!opened) { setStatus('Server unreachable', 'err'); stream.getTracks().forEach((t) => t.stop()); setButtons(true); return; }
+  if (!opened) { setStatus('Server unreachable', 'err'); stopStream(); setButtons(true); return; }
   window.sheet?.attachSocket(ws);
 
-  const ctx = new AudioContext({ sampleRate: 16000 });
+  // Live input: a 16 kHz context (the browser resamples). File: native rate so playback stays
+  // full quality; the engine gets a low-passed, mono, 16 kHz copy from the worklet.
+  const ctx = file ? new AudioContext() : new AudioContext({ sampleRate: 16000 });
   await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([worklet], { type: 'application/javascript' })));
-  const src = ctx.createMediaStreamSource(new MediaStream(audio));
-  const node = new AudioWorkletNode(ctx, 'tap');
+  let src, player = null, fileUrl = null;
+  const node = new AudioWorkletNode(ctx, 'tap', {
+    processorOptions: { inRate: ctx.sampleRate }, channelCount: 1, channelCountMode: 'explicit', channelInterpretation: 'speakers',
+  });
+  if (file) {
+    player = document.createElement('audio');
+    player.controls = true;
+    fileUrl = URL.createObjectURL(file);
+    player.src = fileUrl;
+    $('playerrow').replaceChildren(player);
+    src = ctx.createMediaElementSource(player);
+    src.connect(ctx.destination);  // you hear the file as normal
+    let tail = src;
+    for (let i = 0; i < 2; i++) {  // anti-alias before the worklet's downsampling
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 7000; lp.Q.value = 0.7;
+      tail.connect(lp); tail = lp;
+    }
+    tail.connect(node);
+    window.sheet?.setLocal({ name: file.name, time: () => player.currentTime, playing: () => !player.paused,
+                             duration: () => player.duration });
+  } else {
+    src = ctx.createMediaStreamSource(new MediaStream(audio));
+    src.connect(node);
+  }
   node.port.onmessage = (m) => {
     if (ws.readyState !== 1) return;
     ws.send(m.data.buffer);
     sentAt.push(performance.now());
     if (sentAt.length > 50) sentAt.shift();
   };
-  const an = ctx.createAnalyser(); an.fftSize = 4096; an.smoothingTimeConstant = 0.6;
-  src.connect(node); src.connect(an);
+  const an = ctx.createAnalyser(); an.fftSize = file ? 8192 : 4096; an.smoothingTimeConstant = 0.6;
+  src.connect(an);
 
   let raf, drawErr = false;
   const loop = () => {
@@ -506,9 +547,10 @@ async function start(getStream, label) {
 
   session = (msg = 'Stopped', kind = '') => {
     cancelAnimationFrame(raf);
-    stream.getTracks().forEach((t) => t.stop());
+    stopStream();
+    if (player) { player.pause(); $('playerrow').replaceChildren(); URL.revokeObjectURL(fileUrl); window.sheet?.setLocal(null); }
     ctx.close(); ws.onclose = null; ws.close();
-    document.body.classList.remove('live-mode');
+    document.body.classList.remove('live-mode', 'file-mode');
     setButtons(true);
     $('sig').textContent = 'No input'; $('sig').className = 'none';
     $('lvl').style.clipPath = 'inset(0 100% 0 0)'; $('fps').textContent = ''; $('lat').textContent = '';
@@ -517,10 +559,18 @@ async function start(getStream, label) {
     Object.assign(beatState, { beats: [], segs: [], lastT: 0 }); drawTimeline();
     $('bpm').textContent = '–'; $('beatrow').classList.remove('locked');
   };
-  audio[0].onended = () => session && session();
+  if (audio[0]) audio[0].onended = () => session && session();
   ws.onclose = () => session && session('Disconnected', 'err');
   document.body.classList.add('live-mode');
-  setStatus(`Listening · ${label}`, 'live');
+  if (file) {
+    document.body.classList.add('file-mode');
+    player.onended = () => setStatus(`Finished · ${file.name}`, 'live');
+    player.onplay = () => setStatus(`Playing · ${file.name}`, 'live');
+    player.onpause = () => { if (!player.ended) setStatus(`Paused · ${file.name}`, ''); };
+    try { await player.play(); } catch { setStatus(`Press play · ${file.name}`, ''); }
+  } else {
+    setStatus(`Listening · ${label}`, 'live');
+  }
 }
 
 $('stop').onclick = () => session && session();
@@ -575,6 +625,13 @@ $('mic').onclick = () => {
     listInputs();  // device names become visible once access is granted
     return s;
   }, label);
+};
+
+$('filebtn').onclick = () => $('file').click();
+$('file').onchange = () => {
+  const f = $('file').files[0];
+  $('file').value = '';  // allow choosing the same file again later
+  if (f) start(f, f.name);
 };
 
 $('sys').onclick = () => start(

@@ -28,7 +28,7 @@ def _get(path: str, params: dict) -> object:
         with urllib.request.urlopen(req, timeout=8) as r:
             return json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        if e.code == 404:
+        if e.code in (400, 404):  # 400: e.g. no artist given (local files named just by title)
             return None
         raise
 
