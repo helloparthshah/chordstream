@@ -459,8 +459,32 @@ function drawTimeline() {
 }
 
 // ---------------------------------------------------------------- audio session
+// Mobile browsers only let audio start during a user gesture. The AudioContext is therefore
+// created (and resumed) synchronously in the tap handler, before any await, then handed to start().
+let primed = null;
+function primeAudio(forFile) {
+  try { if (primed) primed.close(); } catch {}
+  primed = forFile ? new AudioContext() : new AudioContext({ sampleRate: 16000 });
+  primed.resume().catch(() => {});
+  return primed;
+}
+function withTimeout(promise, ms, what) {
+  return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} timed out`)), ms))]);
+}
+
 // source: a function returning a MediaStream (mic / screen share), or a File to play.
 async function start(source, label) {
+  try { await startInner(source, label); }
+  catch (err) {
+    console.error(err);
+    setStatus(`Failed: ${err.message || err}`, 'err');
+    setButtons(true);
+    document.body.classList.remove('live-mode', 'file-mode');
+    $('playerrow').replaceChildren();
+  }
+}
+
+async function startInner(source, label) {
   setButtons(false);
   const file = source instanceof File ? source : null;
   let stream = null, audio = [];
@@ -491,14 +515,20 @@ async function start(source, label) {
     if (t0) $('lat').textContent = `round trip ${(performance.now() - t0).toFixed(0)} ms`;
     showChord(e);
   };
-  const opened = await new Promise((r) => { ws.onopen = () => r(true); ws.onerror = () => r(false); });
+  setStatus('Connecting…');
+  const opened = await withTimeout(new Promise((r) => { ws.onopen = () => r(true); ws.onerror = () => r(false); }),
+                                   10000, 'connecting to the server').catch(() => false);
   if (!opened) { setStatus('Server unreachable', 'err'); stopStream(); setButtons(true); return; }
   window.sheet?.attachSocket(ws);
 
   // Live input: a 16 kHz context (the browser resamples). File: native rate so playback stays
   // full quality; the engine gets a low-passed, mono, 16 kHz copy from the worklet.
-  const ctx = file ? new AudioContext() : new AudioContext({ sampleRate: 16000 });
-  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([worklet], { type: 'application/javascript' })));
+  setStatus('Starting audio…');
+  const ctx = primed && primed.state !== 'closed' ? primed : primeAudio(!!file);
+  primed = null;  // this session owns it now
+  await withTimeout(ctx.resume(), 10000, 'starting audio (tap the button again)');
+  await withTimeout(ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([worklet], { type: 'application/javascript' }))),
+                    10000, 'loading the audio processor');
   let src, player = null, fileUrl = null;
   const node = new AudioWorkletNode(ctx, 'tap', {
     processorOptions: { inRate: ctx.sampleRate }, channelCount: 1, channelCountMode: 'explicit', channelInterpretation: 'speakers',
@@ -506,6 +536,7 @@ async function start(source, label) {
   if (file) {
     player = document.createElement('audio');
     player.controls = true;
+    player.onerror = () => setStatus(`This browser can't play ${file.name}`, 'err');
     fileUrl = URL.createObjectURL(file);
     player.src = fileUrl;
     $('playerrow').replaceChildren(player);
@@ -618,6 +649,7 @@ $('dev').onchange = async () => {
 };
 
 $('mic').onclick = () => {
+  primeAudio(false);
   const id = $('dev').value;
   const label = id ? $('dev').selectedOptions[0].textContent : 'default input';
   start(async () => {
@@ -627,14 +659,14 @@ $('mic').onclick = () => {
   }, label);
 };
 
-$('filebtn').onclick = () => $('file').click();
+$('filebtn').onclick = () => { primeAudio(true); $('file').click(); };
 $('file').onchange = () => {
   const f = $('file').files[0];
   $('file').value = '';  // allow choosing the same file again later
   if (f) start(f, f.name);
 };
 
-$('sys').onclick = () => start(
+$('sys').onclick = () => primeAudio(false) && start(
   () => navigator.mediaDevices.getDisplayMedia({
     video: true,  // Chrome requires a video request; the track is stopped right away
     audio: { ...AUDIO, suppressLocalAudioPlayback: false },
