@@ -153,6 +153,18 @@ are not wired into the engine. The causal beat tracker currently scores beat Fâ‰
 right on 6/10 songs, with half-tempo or off-beat locking on the rest). The next levers are
 more real training data and transition-focused training.
 
+**Using it from other devices on your LAN:** browsers only allow microphone access on
+HTTPS pages or localhost, so serve HTTPS with a self-signed certificate:
+
+```powershell
+openssl req -x509 -newkey rsa:2048 -nodes -days 825 -keyout data/certs/key.pem -out data/certs/cert.pem `
+  -subj "/CN=chordstream" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:<your LAN IP>"
+uv run chordstream serve --host 0.0.0.0 --ssl-certfile data/certs/cert.pem --ssl-keyfile data/certs/key.pem
+```
+
+Open `https://<your LAN IP>:8000` and accept the certificate warning once per device. "Now
+playing" and the lyrics follow the media playing on the server PC.
+
 ## WebSocket protocol
 
 Send binary messages of little-endian float32 mono PCM at 16 kHz, in any chunk size.
