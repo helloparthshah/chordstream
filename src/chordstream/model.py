@@ -114,6 +114,8 @@ class ChordNet(nn.Module):
         self.blocks = nn.ModuleList(Block(cfg) for _ in range(cfg.n_layers))
         self.ln_f = nn.LayerNorm(cfg.d_model)
         self.head = nn.Linear(cfg.d_model, cfg.n_classes)
+        if cfg.sheet_delay:
+            self.sheet_head = nn.Linear(cfg.d_model, cfg.n_classes)
         if cfg.key_input:
             self.key_proj = nn.Linear(12, cfg.d_model)
         if cfg.structured:
@@ -155,6 +157,8 @@ class ChordNet(nn.Module):
         """Chord logits plus the structured heads (training only)."""
         h = self.features(x)
         out = {"chord": self.head(h)}
+        if self.cfg.sheet_delay:
+            out["sheet"] = self.sheet_head(h)
         if self.cfg.structured:
             out.update(root=self.root_head(h), bass=self.bass_head(h), notes=self.notes_head(h))
         return out
@@ -170,6 +174,7 @@ class StreamingStep(nn.Module):
     inputs : frames (1, RF, F)  newest RF CQT frames (RF = CNN receptive field = 13)
              k_cache, v_cache (L, 1, H, W-1, dh)
     outputs: probs (1, n_classes), new k_cache, new v_cache
+             [+ sheet_probs (1, n_classes) when the model has a sheet head (E26)]
     """
 
     def __init__(self, net: ChordNet):
@@ -186,7 +191,11 @@ class StreamingStep(nn.Module):
             h, k, v = blk.step(h, k_cache[i], v_cache[i], self.bias)
             ks.append(k)
             vs.append(v)
-        probs = torch.softmax(self.net.head(self.net.ln_f(h))[:, 0], dim=-1)
+        h = self.net.ln_f(h)
+        probs = torch.softmax(self.net.head(h)[:, 0], dim=-1)
+        if self.net.cfg.sheet_delay:
+            sheet = torch.softmax(self.net.sheet_head(h)[:, 0], dim=-1)
+            return probs, torch.stack(ks), torch.stack(vs), sheet
         return probs, torch.stack(ks), torch.stack(vs)
 
 

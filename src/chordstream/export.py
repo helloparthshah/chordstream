@@ -30,7 +30,7 @@ def silence_state(step: StreamingStep, net: ChordNet, cfg: BundleConfig):
     k = torch.zeros(net.cache_shape())
     v = torch.zeros(net.cache_shape())
     for _ in range(cfg.model.n_layers * cfg.model.context_frames):  # flush every layer's window
-        _, k, v = step(frames, k, v)
+        _, k, v = step(frames, k, v)[:3]
     return k, v
 
 
@@ -46,7 +46,8 @@ def export_onnx(bundle_dir: str | Path, opset: int = 17) -> Path:
     path = bundle_dir / "model.onnx"
     torch.onnx.export(
         step, (frames, k0, v0), str(path), opset_version=opset, dynamo=False,
-        input_names=["frames", "k_cache", "v_cache"], output_names=["probs", "k_out", "v_out"],
+        input_names=["frames", "k_cache", "v_cache"],
+        output_names=["probs", "k_out", "v_out"] + (["sheet_probs"] if cfg.model.sheet_delay else []),
     )
 
     import onnxruntime as ort

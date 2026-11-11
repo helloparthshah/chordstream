@@ -83,23 +83,25 @@ def structured_loss(out: dict, aux: torch.Tensor) -> torch.Tensor:
 
 
 @torch.no_grad()
-def predict_song(net: ChordNet, feats: np.ndarray, device, chunk: int = 1024) -> np.ndarray:
-    """Posteriors aligned to the frames they describe (a label-delay model's output t is frame t - d)."""
-    probs = _predict_song(net, feats, device, chunk)
-    d = getattr(net.cfg, "label_delay", 0)
+def predict_song(net: ChordNet, feats: np.ndarray, device, chunk: int = 1024, head: str = "chord") -> np.ndarray:
+    """Posteriors aligned to the frames they describe (a label-delay model's output t is frame t - d).
+    head="sheet" reads the E26 sheet head instead (delay sheet_delay)."""
+    probs = _predict_song(net, feats, device, chunk, head)
+    d = getattr(net.cfg, "sheet_delay" if head == "sheet" else "label_delay", 0)
     if d > 0:
         probs = np.concatenate([probs[d:], np.repeat(probs[-1:], d, 0)])
     return probs
 
 
 @torch.no_grad()
-def _predict_song(net: ChordNet, feats: np.ndarray, device, chunk: int = 1024) -> np.ndarray:
+def _predict_song(net: ChordNet, feats: np.ndarray, device, chunk: int = 1024, head: str = "chord") -> np.ndarray:
     """Exact whole-song causal posteriors, computed in overlapping chunks.
 
     Each output's dependency cone spans n_layers * (context_frames - 1) + CNN receptive
     field frames, so chunks overlapping by that much reproduce the streaming result.
     """
     net.eval()
+    fwd = net if head == "chord" else (lambda x: net.sheet_head(net.features(x)))
     ctx = net.cfg.n_layers * net.cfg.context_frames + 16
     if net.cfg.bidirectional:  # needs context on both sides: keep only each chunk's centre
         chunk = max(chunk, 4 * ctx)
@@ -109,7 +111,7 @@ def _predict_song(net: ChordNet, feats: np.ndarray, device, chunk: int = 1024) -
         step = chunk - 2 * ctx
         for s in range(0, T, step):
             a, e = max(0, s - ctx), min(T, s + step + ctx)
-            p = torch.softmax(net(x[None, a:e]).float(), -1)[0].cpu().numpy()
+            p = torch.softmax(fwd(x[None, a:e]).float(), -1)[0].cpu().numpy()
             probs[s : min(T, s + step)] = p[s - a : s - a + min(step, T - s)]
         return probs
     chunk = max(chunk, 2 * ctx)
@@ -119,7 +121,7 @@ def _predict_song(net: ChordNet, feats: np.ndarray, device, chunk: int = 1024) -
     for s in range(0, T, chunk - ctx):
         a = max(0, s - ctx)
         e = min(T, a + chunk)
-        p = torch.softmax(net(x[None, a:e]).float(), -1)[0, s - a :].cpu().numpy()
+        p = torch.softmax(fwd(x[None, a:e]).float(), -1)[0, s - a :].cpu().numpy()
         probs[s : s + len(p)] = p
         if e == T:
             break
@@ -207,6 +209,7 @@ def train(
             bundle.model.structured = model_cfg.structured
             bundle.model.key_input = model_cfg.key_input
             bundle.model.label_delay = model_cfg.label_delay
+            bundle.model.sheet_delay = model_cfg.sheet_delay
     else:
         bundle = BundleConfig(frontend_cfg or FrontendConfig(), model_cfg or ModelConfig())
     if bidirectional:  # offline teacher (weights from a causal init transfer: same shapes)
@@ -251,6 +254,7 @@ def train(
         t0, tot, n = time.time(), 0.0, 0
         for x, y, q, aux in dl:
             x, y, q, aux = (t.to(dev, non_blocking=True) for t in (x, y, q, aux))
+            y_sheet = delay_targets(y, q, aux, mcfg.sheet_delay)[0] if mcfg.sheet_delay else None
             y, q, aux = delay_targets(y, q, aux, mcfg.label_delay)
             y[:, :WARMUP_CONTEXT] = IGNORE
             aux[:, :WARMUP_CONTEXT, :2] = IGNORE
@@ -263,6 +267,14 @@ def train(
             w = transition_weights(y, transition_weight, round(transition_window_s / fcfg.frame_seconds)).reshape(-1)
             w = w * (y.reshape(-1) != IGNORE)
             loss = (ce * w).sum() / w.sum().clamp_min(1.0)
+            if y_sheet is not None:  # E26: the long-delay sheet head, same weighted loss
+                y_sheet[:, :WARMUP_CONTEXT] = IGNORE
+                ce2 = F.cross_entropy(out["sheet"].float().reshape(-1, mcfg.n_classes), y_sheet.reshape(-1),
+                                      ignore_index=IGNORE, label_smoothing=0.05, reduction="none")
+                w2 = transition_weights(y_sheet, transition_weight,
+                                        round(transition_window_s / fcfg.frame_seconds)).reshape(-1)
+                w2 = w2 * (y_sheet.reshape(-1) != IGNORE)
+                loss = loss + (ce2 * w2).sum() / w2.sum().clamp_min(1.0)
             # Distillation: match the offline teacher's posteriors where they exist
             # (unlabelled songs have only these; labelled songs get both).
             has_q = q.sum(-1) > 0

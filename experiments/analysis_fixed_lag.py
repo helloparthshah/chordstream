@@ -1,6 +1,7 @@
 """E23/E24 fairness checks: fixed-lag decoding for every model, and the same HMM grid for every model.
 
 usage: python experiments/analysis_fixed_lag.py <cache> <out.json> bundle [bundle ...]
+       (bundle:sheet scores an E26 model's sheet head)
 """
 import json
 import sys
@@ -22,8 +23,11 @@ dev = "cuda" if torch.cuda.is_available() else "cpu"
 _, val = split_files(cache)
 
 
-def posteriors(bundle):
-    p = Path("data/analysis") / f"{Path(bundle).name}__{Path(cache).name}.npz"
+def posteriors(spec):
+    bundle, _, head = spec.partition(":")
+    head = head or "chord"
+    tag = Path(bundle).name + ("" if head == "chord" else f"_{head}")
+    p = Path("data/analysis") / f"{tag}__{Path(cache).name}.npz"
     if p.exists():
         d = np.load(p, allow_pickle=True)
         return list(d["probs"]), list(d["labels"]), list(d["ids"])
@@ -32,7 +36,7 @@ def posteriors(bundle):
     probs, labels, ids = [], [], []
     for f in val:
         d = np.load(f)
-        probs.append(predict_song(net, d["feats"].astype(np.float32), dev).astype(np.float32))
+        probs.append(predict_song(net, d["feats"].astype(np.float32), dev, head=head).astype(np.float32))
         labels.append(d["labels"].astype(np.int64))
         ids.append(f.stem.split("__")[-1])
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -88,7 +92,7 @@ results = {}
 for b in bundles:
     probs, labels, ids = posteriors(b)
     ext = probs[0].shape[1] > 25
-    base = OnlineHMM.load(Path(b) / "hmm.npz")
+    base = OnlineHMM.load(Path(b.partition(":")[0]) / "hmm.npz")
     r = {"bundle_hmm": {"seconds": round(FS / (1 - base.p_stay), 2), "power": base.power}}
     # bundle HMM at lag 0/3/6
     for lag in (0, 3, 6):

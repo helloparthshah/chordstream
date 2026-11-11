@@ -52,6 +52,9 @@ class ModelConfig:
     # label_delay frames of "future" context (display latency = label_delay x 40 ms). The network
     # and the KV-cached streaming step are unchanged; only the meaning of the output shifts.
     label_delay: int = 0
+    # E26: optional second chord head trained with a longer delay (frames), used only for the
+    # per-beat chords of the chord sheet, which are already a beat late. 0 = no sheet head.
+    sheet_delay: int = 0
 
 
 @dataclass

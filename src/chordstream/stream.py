@@ -93,9 +93,10 @@ class ChordStream:
             t0 = time.perf_counter()
             self.frames[0, :-1] = self.frames[0, 1:]
             self.frames[0, -1] = frame
-            probs, self.k, self.v = self.sess.run(
-                None, {"frames": self.frames, "k_cache": self.k, "v_cache": self.v})
-            probs = probs[0]
+            outs = self.sess.run(None, {"frames": self.frames, "k_cache": self.k, "v_cache": self.v})
+            probs, self.k, self.v = outs[0][0], outs[1], outs[2]
+            # E26: per-beat chords come from the sheet head (longer delay) when the model has one.
+            pool, d = (outs[3][0], self.cfg.model.sheet_delay) if len(outs) > 3 else (probs, self.cfg.model.label_delay)
             raw = int(probs.argmax())
             idx, conf = self.hmm.step(probs) if self.hmm else (raw, float(probs[raw]))
             b = self.beats.step(frame)
@@ -104,12 +105,11 @@ class ChordStream:
             changed = idx != self.current
             self.current = idx
             fs = self.cfg.frontend.frame_seconds
-            d = self.cfg.model.label_delay
             now = self.n_frames * fs
             ev = ChordEvent(now, idx, CLASS_NAMES[idx], pretty_name(idx), conf, raw, changed, b.beat,
-                            round(b.bpm, 1), round(b.confidence, 2), delay=d * fs)
-            if self.n_frames > d:  # probs describe frame n_frames - d; earlier ones describe nothing
-                self.beat_acc += probs
+                            round(b.bpm, 1), round(b.confidence, 2), delay=self.cfg.model.label_delay * fs)
+            if self.n_frames > d:  # pooled probs describe frame n_frames - d; earlier ones describe nothing
+                self.beat_acc += pool
             if b.beat:
                 self.pending_beats.append(self.n_frames)
             # A beat closes once the frames it covers have all been described (d hops after the beat).

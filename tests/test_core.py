@@ -135,6 +135,37 @@ def test_streaming_step_matches_full_forward():
     torch.testing.assert_close(torch.stack(outs[P:]), full, atol=1e-5, rtol=1e-4)
 
 
+def test_sheet_head_streaming_and_predict():
+    """E26: the streaming step's sheet output equals the full forward pass of the sheet head, and
+    predict_song(head="sheet") realigns by sheet_delay."""
+    torch = pytest.importorskip("torch")
+    from chordstream.config import ModelConfig
+    from chordstream.model import ChordNet, StreamingStep, receptive_field_cnn
+    from chordstream.train import _predict_song, predict_song
+
+    cfg = ModelConfig(d_model=64, n_layers=2, n_heads=4, context_frames=8, label_delay=1, sheet_delay=4)
+    torch.manual_seed(0)
+    net = ChordNet(cfg).eval()
+    step = StreamingStep(net).eval()
+    rf = receptive_field_cnn(cfg)
+    P = cfg.n_layers * cfg.context_frames + rf
+    seq = torch.cat([torch.zeros(1, P, cfg.n_bins), torch.rand(1, 30, cfg.n_bins) * 3], dim=1)
+    with torch.no_grad():
+        full = torch.softmax(net.sheet_head(net.features(seq)), -1)[0, P:]
+        k, v = torch.zeros(net.cache_shape()), torch.zeros(net.cache_shape())
+        win = torch.zeros(1, rf, cfg.n_bins)
+        outs = []
+        for t in range(seq.shape[1]):
+            win = torch.cat([win[:, 1:], seq[:, t : t + 1]], dim=1)
+            _, k, v, sheet = step(win, k, v)
+            outs.append(sheet[0])
+    torch.testing.assert_close(torch.stack(outs[P:]), full, atol=1e-5, rtol=1e-4)
+    feats = seq[0].numpy()
+    raw = _predict_song(net, feats, "cpu", head="sheet")
+    np.testing.assert_allclose(predict_song(net, feats, "cpu", head="sheet")[:-4], raw[4:], atol=1e-6)
+    assert not np.allclose(raw, _predict_song(net, feats, "cpu"))
+
+
 def test_banded_mask_limits_context():
     torch = pytest.importorskip("torch")
     from chordstream.config import ModelConfig
