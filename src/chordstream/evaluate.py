@@ -143,6 +143,8 @@ def run(bundle: str, cache: str, raw: str = "data/billboard_raw", manifest: str 
     hmm = OnlineHMM.load(Path(bundle) / "hmm.npz")
 
     out = {"songs": len(songs), "beat_tracker": beat_quality(songs), "baseline": score(songs, hmm, None)}
+    if net.cfg.n_classes > 25:  # extended model: also its majmin reduction, comparable with majmin models
+        out["majmin"] = score(songs, hmm, None, majmin=True)
     if grid:
         results = []
         for lag, window, suppress in itertools.product((0, 2, 4, 6), (1, 2), (0.5, 0.25, 0.1)):

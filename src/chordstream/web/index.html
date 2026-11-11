@@ -259,10 +259,23 @@ let session = null, lastName = null, chordTones = new Set(), rootPc = -1, spelle
 // Spell triad tones by letter (E major -> E G♯ B, not E A♭ B).
 const LETTERS = 'CDEFGAB', NAT = [0, 2, 4, 5, 7, 9, 11];
 const ACC = { 0: '', 1: '♯', 2: '𝄪', 11: '♭', 10: '𝄫' };
-function spellTriad(root, minor) {
+// Chord tones as [letter steps above the root, semitones above the root], per quality.
+const QUALITY = {
+  maj: { name: 'major', tones: [[0, 0], [2, 4], [4, 7]] },
+  min: { name: 'minor', tones: [[0, 0], [2, 3], [4, 7]] },
+  7: { name: 'dominant 7th', tones: [[0, 0], [2, 4], [4, 7], [6, 10]] },
+  maj7: { name: 'major 7th', tones: [[0, 0], [2, 4], [4, 7], [6, 11]] },
+  min7: { name: 'minor 7th', tones: [[0, 0], [2, 3], [4, 7], [6, 10]] },
+  dim: { name: 'diminished', tones: [[0, 0], [2, 3], [4, 6]] },
+  aug: { name: 'augmented', tones: [[0, 0], [2, 4], [4, 8]] },
+  sus2: { name: 'suspended 2nd', tones: [[0, 0], [1, 2], [4, 7]] },
+  sus4: { name: 'suspended 4th', tones: [[0, 0], [3, 5], [4, 7]] },
+};
+const MINORISH = new Set(['min', 'min7', 'dim']);
+function spellChord(root, q) {
   const li = LETTERS.indexOf(root[0]);
   const rpc = PC[root];
-  return [[0, 0], [2, minor ? 3 : 4], [4, 7]].map(([steps, semis]) => {
+  return (QUALITY[q] || QUALITY.maj).tones.map(([steps, semis]) => {
     const l = (li + steps) % 7, pc = (rpc + semis) % 12;
     return [pc, LETTERS[l] + ACC[(pc - NAT[l] + 12) % 12]];
   });
@@ -282,10 +295,10 @@ function showChord(e) {
   chordTones = new Set(); rootPc = -1;
   if (root in PC) {
     rootPc = PC[root];
-    const tones = spellTriad(root, q === 'min');
+    const tones = spellChord(root, q);
     spelled = Object.fromEntries(tones);
     tones.forEach(([pc]) => chordTones.add(pc));
-    $('quality').textContent = `${tones[0][1]} ${q === 'min' ? 'minor' : 'major'} · ${tones.map((t) => t[1]).join(' – ')}`;
+    $('quality').textContent = `${tones[0][1]} ${(QUALITY[q] || QUALITY.maj).name} · ${tones.map((t) => t[1]).join(' – ')}`;
   } else {
     spelled = {};
     $('quality').textContent = 'No chord';
@@ -421,7 +434,8 @@ function onBeatEvent(e) {
 function chordColor(label) {
   const [root, q] = (label || '').split(':');
   if (!(root in PC)) return css('--chroma-off');
-  return `hsl(${PC[root] * 30} ${q === 'min' ? 45 : 70}% ${q === 'min' ? 45 : 58}%)`;
+  const m = MINORISH.has(q);
+  return `hsl(${PC[root] * 30} ${m ? 45 : 70}% ${m ? 45 : 58}%)`;
 }
 function drawTimeline() {
   const [g, w, h] = fitCanvas($('timeline'));

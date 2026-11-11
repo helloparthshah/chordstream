@@ -451,25 +451,50 @@
 
   // ------------------------------------------------------------ guitar chord diagrams
   const PCS = { C: 0, 'C#': 1, D: 2, Eb: 3, E: 4, F: 5, 'F#': 6, G: 7, Ab: 8, A: 9, Bb: 10, B: 11 };
+  // Common open-position voicings (string 6 -> 1, -1 = muted).
   const OPEN = {
     'C:maj': [-1, 3, 2, 0, 1, 0], 'A:maj': [-1, 0, 2, 2, 2, 0], 'G:maj': [3, 2, 0, 0, 0, 3], 'E:maj': [0, 2, 2, 1, 0, 0],
     'D:maj': [-1, -1, 0, 2, 3, 2], 'A:min': [-1, 0, 2, 2, 1, 0], 'E:min': [0, 2, 2, 0, 0, 0], 'D:min': [-1, -1, 0, 2, 3, 1],
+    'C:7': [-1, 3, 2, 3, 1, 0], 'G:7': [3, 2, 0, 0, 0, 1], 'D:7': [-1, -1, 0, 2, 1, 2], 'E:7': [0, 2, 0, 1, 0, 0],
+    'A:7': [-1, 0, 2, 0, 2, 0], 'C:maj7': [-1, 3, 2, 0, 0, 0], 'F:maj7': [-1, -1, 3, 2, 1, 0], 'A:maj7': [-1, 0, 2, 1, 2, 0],
+    'D:min7': [-1, -1, 0, 2, 1, 1], 'A:min7': [-1, 0, 2, 0, 1, 0], 'E:min7': [0, 2, 0, 0, 0, 0],
+    'D:sus4': [-1, -1, 0, 2, 3, 3], 'D:sus2': [-1, -1, 0, 2, 3, 0], 'A:sus4': [-1, 0, 2, 2, 3, 0], 'A:sus2': [-1, 0, 2, 2, 0, 0],
+    'E:sus4': [0, 2, 2, 2, 0, 0],
+  };
+  // Movable shapes as fret offsets from the root fret (null = muted). E-shape: root on string 6;
+  // A-shape: root on string 5. Offset 0 strings are barred.
+  const E_SHAPE = {
+    maj: [0, 2, 2, 1, 0, 0], min: [0, 2, 2, 0, 0, 0], 7: [0, 2, 0, 1, 0, 0], maj7: [0, 2, 1, 1, 0, 0],
+    min7: [0, 2, 0, 0, 0, 0], sus4: [0, 2, 2, 2, 0, 0],
+  };
+  const A_SHAPE = {
+    maj: [null, 0, 2, 2, 2, 0], min: [null, 0, 2, 2, 1, 0], 7: [null, 0, 2, 0, 2, 0], maj7: [null, 0, 2, 1, 2, 0],
+    min7: [null, 0, 2, 0, 1, 0], sus2: [null, 0, 2, 2, 0, 0], sus4: [null, 0, 2, 2, 3, 0],
+    dim: [null, 0, 1, 2, 1, null], aug: [null, 0, -1, -2, -2, null],
   };
   function shape(label) {
     if (OPEN[label]) return { frets: OPEN[label], barre: 0 };
     const [root, q] = label.split(':');
-    const pc = PCS[root], minor = q === 'min';
-    const fe = (pc - 4 + 12) % 12 || 12, fa = (pc - 9 + 12) % 12 || 12;
-    if (fe <= fa) {
-      const f = fe;
-      return { frets: minor ? [f, f + 2, f + 2, f, f, f] : [f, f + 2, f + 2, f + 1, f, f], barre: f, from: 0 };
+    const pc = PCS[root];
+    const cands = [];
+    if (E_SHAPE[q]) cands.push({ off: E_SHAPE[q], f: (pc - 4 + 12) % 12, from: 0 });
+    if (A_SHAPE[q]) {
+      let f = (pc - 9 + 12) % 12;
+      if (q === 'aug' && f < 2) f += 12;  // the aug shape reaches two frets below the root
+      cands.push({ off: A_SHAPE[q], f, from: 1 });
     }
-    const f = fa;
-    return { frets: minor ? [-1, f, f + 2, f + 2, f + 1, f] : [-1, f, f + 2, f + 2, f + 2, f], barre: f, from: 1 };
+    if (!cands.length) return null;
+    const c = cands.reduce((a, b) => (b.f < a.f ? b : a));
+    const frets = c.off.map((o) => (o === null ? -1 : c.f + o));
+    const barred = c.f > 0 && c.off.filter((o) => o === 0).length >= 2 && !['dim', 'aug'].includes(q);
+    return { frets, barre: barred ? c.f : 0, from: c.from };
   }
+  window.chordShape = shape;  // exposed for the shape self-check
   window.chordDiagram = (label) => {
     if (!label || !label.includes(':')) return '';
-    const { frets, barre, from } = shape(label);
+    const sh = shape(label);
+    if (!sh) return '';
+    const { frets, barre, from } = sh;
     const played = frets.filter((f) => f > 0);
     const base = Math.max(...played) > 4 ? Math.min(...played) : 1;
     const W = 132, H = 136, x0 = 30, y0 = 24, sx = 18, sy = 22;

@@ -121,9 +121,14 @@ def cmd_evaluate(a):
     for name, ids in (("all held-out", None), ("original 10", ORIGINAL_VAL)):
         for bundle in a.bundles:
             r = run(bundle, a.cache, ids=ids)
-            b = r["baseline"]
-            print(f"{name:13s} {bundle:22s} songs {r['songs']:3d}  raw {b['raw_acc']:.3f}  hmm {b['acc']:.3f}  "
-                  f"changes {b['change_ratio']:.2f}x  change_f {b['change_f']:.3f}  lag {b['lag_ms']:+.0f} ms", flush=True)
+            for view in ("baseline", "majmin"):
+                if view not in r:
+                    continue
+                b = r[view]
+                tag = "" if view == "baseline" else " [majmin view]"
+                print(f"{name:13s} {bundle:22s} songs {r['songs']:3d}  hmm {b['acc']:.3f}  "
+                      f"changes {b['change_ratio']:.2f}x  change_f {b['change_f']:.3f}  lag {b['lag_ms']:+.0f} ms{tag}",
+                      flush=True)
 
 
 def cmd_audit(a):
