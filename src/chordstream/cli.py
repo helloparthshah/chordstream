@@ -122,6 +122,16 @@ def cmd_evaluate(a):
                   f"changes {b['change_ratio']:.2f}x  change_f {b['change_f']:.3f}  lag {b['lag_ms']:+.0f} ms", flush=True)
 
 
+def cmd_audit(a):
+    from .data.audit import run
+
+    rows = run(a.cache, a.out, a.bundle)
+    worst = sorted(rows, key=lambda r: -r["drift_s"])[:10]
+    print(f"audited {len(rows)} songs -> {a.out}; largest drift:")
+    for r in worst:
+        print(f"  {r['drift_s']:.2f}s  {r['artist'][:24]} - {r['title'][:32]}")
+
+
 def cmd_serve(a):
     import os
 
@@ -267,6 +277,12 @@ def main(argv=None):
     s.add_argument("bundles", nargs="+")
     s.add_argument("--cache", default="data/cache_bb")
     s.set_defaults(fn=cmd_evaluate)
+
+    s = sp.add_parser("audit", help="check annotated songs: alignment, drift, key, tuning (+ model agreement)")
+    s.add_argument("--cache", default="data/cache_bb")
+    s.add_argument("--out", default="data/audit.csv")
+    s.add_argument("--bundle", help="optional model bundle for per-song agreement")
+    s.set_defaults(fn=cmd_audit)
 
     s = sp.add_parser("export", help="export bundle to ONNX (+ parity check)")
     s.add_argument("bundle", nargs="?", default="models/latest")
