@@ -305,7 +305,9 @@ function fitCanvas(c) {
   return [g, r.width, r.height];
 }
 function roundRect(g, x, y, w, h, r) {
-  r = Math.min(r, w / 2, h / 2);
+  // Degenerate boxes must not reach arcTo: a negative radius throws and would kill the draw loop.
+  w = Math.max(0, w); h = Math.max(0, h);
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
   g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
   g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
 }
@@ -423,7 +425,7 @@ function drawTimeline() {
     const end = i + 1 < b.segs.length ? b.segs[i + 1].t : now;
     if (end < now - span) return;
     const x0 = Math.max(0, X(sg.t)), x1 = Math.min(w, X(end));
-    if (x1 - x0 < 1) return;
+    if (x1 - x0 < 3) return;  // too thin to draw (a one-frame flicker)
     g.fillStyle = chordColor(sg.label); g.globalAlpha = sg.name === 'N.C.' ? .25 : .55;
     roundRect(g, x0 + 1, top, x1 - x0 - 2, h - top, 6); g.fill(); g.globalAlpha = 1;
     if (x1 - x0 > 24) {
@@ -487,13 +489,16 @@ async function start(getStream, label) {
   const an = ctx.createAnalyser(); an.fftSize = 4096; an.smoothingTimeConstant = 0.6;
   src.connect(node); src.connect(an);
 
-  let raf;
+  let raf, drawErr = false;
   const loop = () => {
-    drawFrame(an, ctx.sampleRate);
-    drawTimeline();
+    raf = requestAnimationFrame(loop);  // schedule first: a drawing error can never stop the loop
+    try { drawFrame(an, ctx.sampleRate); drawTimeline(); }
+    catch (err) { if (!drawErr) { console.error('visualizer', err); drawErr = true; } }
     const now = performance.now();
-    if (now - rateT > 1000) { $('fps').textContent = `${events} frames/s`; events = 0; rateT = now; }
-    raf = requestAnimationFrame(loop);
+    if (now - rateT > 1000) {
+      $('fps').textContent = events ? `${events} frames/s` : 'no frames from server';
+      events = 0; rateT = now;
+    }
   };
   loop();
 
