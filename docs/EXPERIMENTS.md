@@ -218,6 +218,26 @@ Dates are the day the experiment ran.
 - **Decision rule:** pursue a causal version (decaying 60 s note profile) only if this gains ≥ 0.5 pt.
 - **Result:** pending.
 
+### F01 · Flutter diagnosis (decoding only, no retraining) · 2026-11-12
+- **Question:** where do the extra chord changes (1.6× the reference) come from, and can decoding fix them?
+- **Anatomy (v5, 36 clean held-out):** 1,279 predicted segments < 0.3 s vs 13 in the reference
+  (923 vs 239 at 0.3–0.6 s); longer segments match. Flips are between neighbouring chords: D↔E 306,
+  A↔D 94, B↔E 76, A↔E 75, C↔G 73, …, concentrated at real chord changes.
+- **Decoding variants:**
+
+  | variant | acc | changes | change-F | cost |
+  |---|---|---|---|---|
+  | deployed | 80.8% | 1.60× | 0.599 | – |
+  | hysteresis 2 / 4 / 6 frames | 79.4 / 76.6 / 73.9% | 1.51 / 1.38 / 1.26× | 0.58 / 0.47 / 0.28 | +80–240 ms |
+  | oracle change points | 81.6% | 1.48× | 0.636 | (oracle) |
+  | fixed-lag HMM 3 / 5 / 8 frames | 82.6 / 82.8 / 82.9% | 1.54 / 1.46 / 1.38× | 0.65 / 0.67 / 0.68 | +120–320 ms |
+  | no reversal 5–25 frames | 80.5–78.6% | 1.58–1.60× | ≤ 0.60 | – |
+  | teacher (±5 s lookahead) | 82.9% | 1.04× | 0.71 | offline |
+
+- **Conclusion:** the flutter comes from the network (confident flips in the first frames after a
+  change); no causal decoding rule removes it. Only future context does. Fixed-lag decoding is a free
+  +2 pts of accuracy for 80–120 ms of delay.
+
 ---
 
 ## Queue
@@ -227,6 +247,8 @@ Dates are the day the experiment ran.
 | E21 | Bollywood domain adaptation | All 394 labelled songs are US Billboard hits (1958–1991); no Bollywood | Unlabelled Bollywood audio (a few hundred songs) pseudo-labelled by the teacher, as in E17; measure on ~20 songs with Ultimate Guitar chord sheets (sequence agreement, untimed). First probe: *Raat Bhar* (Heropanti) with v6 vs its UG sheet (E, B, C♯m, A, D): key **matches** (E major); 93% of time on the sheet's chords (extra: G♯m 6%); 88% of the sheet's 75 changes found in order; over-segmented 136 vs 75 changes, mostly A↔C♯m and C♯m↔B wavering. Use this scoring (key, time-in-sheet, sequence coverage) for the Bollywood test set. **Timed labels idea:** UG sheets put chords over words and LRCLIB + Whisper time the words, so sheet + lyrics give approximately timed human chord labels for sung sections; use them as a timed test set and to check/correct teacher pseudo-labels. Note: training-label sync is checked against audio (fetch-time alignment, E14 audit), never lyrics; pseudo-labels are aligned by construction |
 | later | Seed repeats for v4 vs v5 | Is the distillation gain robust to training randomness? | Retrain both with a second seed (~40 min) |
 | later | Key-aware chord spelling | Names use one fixed spelling (A♭m instead of G♯m in E major) | Display only |
+| E22 | Zero-lookahead anti-flutter training | Can training alone reduce blips? | Stability loss (penalise frame-to-frame prediction change where the label is constant) + stronger distillation (weight 2–3) |
+| E23 | Small-lookahead models (120 / 240 ms) | How much flutter does a little lookahead remove? | Attention/CNN may see 3 or 6 future frames; engine emits decisions that many frames late; candidate "steady" mode beside the instant one |
 | later | Learned beat head | Better beats for E16 (up to +2.7 pts on the sheet) | Multi-task beat output trained on Billboard bar timings |
 | later | Rare chord types (sus, dim, aug) | E18: under 0.5% of frames each, ≈0% recall | Synthetic renders of these qualities mixed into training, or more annotated data |
 | later | More unlabelled audio for distillation | E17 used 299 extra songs; the literature uses 1000+ hours | User library or more fetches |
