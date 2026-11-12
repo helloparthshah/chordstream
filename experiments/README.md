@@ -18,6 +18,8 @@ They assume the synthetic init `models/latest` and the caches built by the CLI:
 | `data/cache_bolly2` | `chordstream bollywood clean` | cleaned labels: bass-aware, capo key, least-confident 30% ignored (E21) |
 | `data/cache_ext_bolly2`, `data/cache_ext_bolly2_rare` | `2026-11-12_bollywood_clean.ps1` | `cache_ext` + cleaned Bollywood ×3 (+ 50 rare renders) (E21e/f) |
 | `data/cache_bolly3` | `2026-11-12_bollywood_scale.ps1` | E21 scale-up: 213 cleaned songs (61 test) (E28; v3 benchmark) |
+| `data/cache_room` | `build_room_cache.py` | room-echo (+ half phone band / noise) copies of the 483 training songs, `roomx__` (E29) |
+| `data/cache_ext_bolly3x2_room` | `2026-11-12_room_echo.ps1` | `cache_ext_bolly3x2` + `cache_room` (E29) |
 | `data/cache_ext_bolly3x1`, `data/cache_ext_bolly3x2` | `2026-11-12_bollywood_scaled_train.ps1` | `cache_ext` + 152 Bollywood training songs ×1 / ×2 (E28) |
 | `data/cache_ext_bolly` | `2026-11-12_bollywood.ps1` (hard links) | `cache_ext` + trusted Bollywood training songs ×3 (E21) |
 | `data/cache_bolly_masked`, `data/cache_ext_bollym3/1` | `bollywood.mask_boundaries`, `2026-11-12_bollywood_masked.ps1` | Bollywood labels ignored ±320 ms around aligned changes; mixes at 3× / 1× (E21c/d) |

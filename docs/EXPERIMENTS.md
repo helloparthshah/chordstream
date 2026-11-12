@@ -668,6 +668,31 @@ Dates are the day the experiment ran.
   - Room echo, however, costs **4.8 pt** of accuracy. The phone-mic band and noise are harmless.
 - **Next:** E29 trains with room-echo copies of the training songs.
 
+### E29 · Room-echo training copies · 2026-11-12 — `models/e29_room`
+
+- **Script:** [`2026-11-12_room_echo.ps1`](../experiments/2026-11-12_room_echo.ps1), using
+  [`build_room_cache.py`](../experiments/build_room_cache.py).
+- **Data:** v9's mix plus one re-rendered copy of each of the 483 training songs in `data/cache_room`
+  (`roomx__` prefix, train-only; test songs are never rendered). Each copy gets a random synthetic room
+  (RT60 0.25–0.9 s). Half of the copies also get the phone-mic band and pink noise at 10–25 dB SNR.
+- **Result** (HMM 5 s / power 2):
+
+  | | Billboard majmin / full | Bollywood v3 majmin | **overall** | room echo (F06) | all degradations |
+  |---|---|---|---|---|---|
+  | v9 | 80.2% / 67.7% | **80.0%** | **80.1%** | 75.4% | 75.0% |
+  | E29 | 80.2% / 67.3% | 79.2% | 79.7% | **77.1%** | **75.8%** |
+
+  Flicker: 47.9 changes/min on clean Billboard, against 46.4 for v9.
+- **Decision:** not deployed. Overall accuracy on the two test sets falls 0.4 pt. The echo gain
+  (+1.7 pt) is measured on synthetic rooms like the training ones, so it is probably optimistic. Worth
+  revisiting once there is real phone-in-a-room test audio.
+
+### E30 · Stability loss with label delay · 2026-11-12 — running
+
+- **Script:** [`2026-11-12_stability_delay.ps1`](../experiments/2026-11-12_stability_delay.ps1).
+- **Setup:** v9's recipe and data, plus E22's stability loss at weights 2 and 5. E22 failed at zero
+  delay; with 120 ms of look-ahead, penalizing flips may now cut flicker inside the model.
+
 ### D01 · Key-aware chord spelling (display) · 2026-11-12
 - Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`
   keeps a ~30 s decaying histogram of the chords' notes, picks the best-fitting major-scale key
@@ -704,6 +729,7 @@ Dates are the day the experiment ran.
 | `v9` | E28b | **live**, release `model-v9` (= `e28b_bolly3x2` + HMM 5 s / power 2) |
 | `e21c_bolly_mask3`, `e21d_bolly_mask1`, `e21e_bolly_clean`, `e21f_bolly_clean_rare` | E21 | Bollywood variants (e21e = v8) |
 | `e28a_bolly3x1`, `e28b_bolly3x2` (+ `_h5p2` eval copies) | E28 | scaled Bollywood mixes; e28b = v9 |
+| `e29_room` (+ `_h5p2`) | E29 | room-echo copies; not deployed |
 | `teacher` | E17 | offline teacher for majmin distillation |
 | `exp_a`, `exp_b`, `exp_w2/3/5`, `exp_g10`, `synth_g10`, `exp_lr3`, `exp_big`, `synth_big`, `v4_clean`, `v4_orig`, `student` | E08–E17 | experiment outputs; safe to delete |
 | `ext_teacher` | E18 | offline teacher for extended-vocabulary distillation |
