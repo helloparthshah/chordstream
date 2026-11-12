@@ -25,7 +25,8 @@
   <h1>Audio route test</h1>
   <p>Start your screen recorder (device audio), then tap each button in turn. Each plays a 3-second
      chord. Afterwards, play the recording back and note which numbers you can hear. "tap" shows whether
-     the chord engine would receive the audio on that route.</p>
+     the chord engine would receive the audio on that route. Routes 6 and 7 ask for the microphone
+     first; run them last, and reload the page before testing 1–5 again.</p>
   <div id="list"></div>
 </main>
 <script>
@@ -92,6 +93,14 @@ const ROUTES = [
       const dest = ctx.createMediaStreamDestination(); s.connect(dest); await tapper(ctx, s, out);
       const sink = new Audio(); sink.srcObject = dest.stream; await ctx.resume(); await sink.play(); await a.play();
       await done(a, ctx); sink.srcObject = null; } },
+  { name: '6 · Mic opened and closed, then route 2', desc: 'Asks for the microphone, releases it at once, then plays like route 2 (what opening the input list does).',
+    run: async (out) => { const m = await navigator.mediaDevices.getUserMedia({ audio: true }); m.getTracks().forEach((t) => t.stop());
+      const ctx = new AudioContext(); const a = player(); const s = ctx.createMediaElementSource(a);
+      s.connect(ctx.destination); await tapper(ctx, s, out); await ctx.resume(); await a.play(); await done(a, ctx); } },
+  { name: '7 · Mic opened and closed, then route 3', desc: 'Same, then plays like route 3 (playback latency).',
+    run: async (out) => { const m = await navigator.mediaDevices.getUserMedia({ audio: true }); m.getTracks().forEach((t) => t.stop());
+      const ctx = new AudioContext({ latencyHint: 'playback' }); const a = player(); const s = ctx.createMediaElementSource(a);
+      s.connect(ctx.destination); await tapper(ctx, s, out); await ctx.resume(); await a.play(); await done(a, ctx); } },
 ];
 const list = document.getElementById('list');
 ROUTES.forEach((r) => {

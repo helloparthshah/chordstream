@@ -504,45 +504,13 @@ function drawTimeline() {
   g.globalAlpha = 1;
 }
 
-// ---------------------------------------------------------------- file analyser
-// AnalyserNode stand-in for file playback (no live Web Audio): spectrum and waveform of the
-// decoded 16 kHz samples just before the playhead (Blackman window, dB re full scale / N, with the
-// same 0.6 smoothing as the live analyser).
-function pcmAnalyser(pcm, headSample, fftSize) {
-  const N = fftSize, re = new Float64Array(N), im = new Float64Array(N), smooth = new Float64Array(N / 2);
-  const win = Float64Array.from({ length: N }, (_, i) => 0.42 - 0.5 * Math.cos(2 * Math.PI * i / N) + 0.08 * Math.cos(4 * Math.PI * i / N));
-  const rev = new Uint32Array(N);
-  for (let i = 0, bits = Math.log2(N); i < N; i++) { let r = 0; for (let b = 0; b < bits; b++) r |= ((i >> b) & 1) << (bits - 1 - b); rev[i] = r; }
-  const frame = (out) => { const end = Math.floor(headSample()); for (let i = 0; i < N; i++) { const j = end - N + i; out[i] = j >= 0 && j < pcm.length ? pcm[j] : 0; } };
-  return {
-    fftSize: N, frequencyBinCount: N / 2,
-    getFloatTimeDomainData(out) { frame(out); },
-    getFloatFrequencyData(out) {
-      const x = new Float32Array(N); frame(x);
-      for (let i = 0; i < N; i++) { re[rev[i]] = x[i] * win[i]; im[rev[i]] = 0; }
-      for (let size = 2; size <= N; size *= 2) {
-        const half = size / 2, step = -2 * Math.PI / size;
-        for (let s0 = 0; s0 < N; s0 += size) for (let k = 0; k < half; k++) {
-          const wr = Math.cos(step * k), wi = Math.sin(step * k), a = s0 + k, b = a + half;
-          const tr = re[b] * wr - im[b] * wi, ti = re[b] * wi + im[b] * wr;
-          re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
-        }
-      }
-      for (let k = 0; k < N / 2; k++) {
-        smooth[k] = 0.6 * smooth[k] + 0.4 * Math.hypot(re[k], im[k]) / N;
-        out[k] = 20 * Math.log10(smooth[k] + 1e-12);
-      }
-    },
-  };
-}
-
 // ---------------------------------------------------------------- audio session
 // Mobile browsers only let audio start during a user gesture. The AudioContext is therefore
 // created (and resumed) synchronously in the tap handler, before any await, then handed to start().
 let primed = null;
 function primeAudio(forFile) {
   try { if (primed) primed.close(); } catch {}
-  primed = forFile ? new AudioContext() : new AudioContext({ sampleRate: 16000 });
+  primed = forFile ? new AudioContext({ latencyHint: 'playback' }) : new AudioContext({ sampleRate: 16000 });
   primed.resume().catch(() => {});
   return primed;
 }
@@ -599,61 +567,51 @@ async function startInner(source, label) {
   if (!opened) { setStatus('Server unreachable', 'err'); stopStream(); setButtons(true); return; }
   window.sheet?.attachSocket(ws);
 
-  // Live input: a 16 kHz Web Audio context with a worklet tap (the browser resamples).
-  // File: no live Web Audio at all. The file plays through a plain <audio> element (like any
-  // website, so Android screen recorders capture it); it is decoded once to 16 kHz mono, and the
-  // samples up to the player's current time are sent as it plays. A running AudioContext, even a
-  // silent one, made Chrome on Android hide the page's sound from screen recorders.
-  let ctx = null, an = null, sr = 16000, player = null, fileUrl = null, sendTimer = null;
-  const send = (chunk) => {
-    if (ws.readyState !== 1) return;
-    ws.send(chunk.buffer);
-    sentAt.push(performance.now());
-    if (sentAt.length > 50) sentAt.shift();
-  };
+  // Live input: a 16 kHz context (the browser resamples). File: native rate so playback stays full
+  // quality, with latencyHint "playback" (Chrome's regular output path rather than its low-latency
+  // one); the element plays through Web Audio and the engine gets a low-passed, mono, 16 kHz copy
+  // from the worklet as it is heard (live, no lookahead). The /static/audiotest.html check showed
+  // Android screen recorders capture this route.
+  setStatus('Starting audio…');
+  const ctx = primed && primed.state !== 'closed' ? primed : primeAudio(!!file);
+  primed = null;  // this session owns it now
+  await withTimeout(ctx.resume(), 10000, 'starting audio (tap the button again)');
+  await withTimeout(ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([worklet], { type: 'application/javascript' }))),
+                    10000, 'loading the audio processor');
+  const sr = ctx.sampleRate;
+  let src, player = null, fileUrl = null;
+  const node = new AudioWorkletNode(ctx, 'tap', {
+    processorOptions: { inRate: ctx.sampleRate }, channelCount: 1, channelCountMode: 'explicit', channelInterpretation: 'speakers',
+  });
   if (file) {
-    setStatus(`Decoding ${file.name}…`);
-    const data = await file.arrayBuffer();
-    const decoded = await new OfflineAudioContext(1, 1, 16000).decodeAudioData(data);  // resampled to 16 kHz
-    const pcm = new Float32Array(decoded.length);
-    for (let c = 0; c < decoded.numberOfChannels; c++) {
-      const ch = decoded.getChannelData(c);
-      for (let i = 0; i < pcm.length; i++) pcm[i] += ch[i] / decoded.numberOfChannels;
-    }
     player = document.createElement('audio');
     player.controls = true;
     player.onerror = () => setStatus(`This browser can't play ${file.name}`, 'err');
     fileUrl = URL.createObjectURL(file);
     player.src = fileUrl;
     $('playerrow').replaceChildren(player);
-    const HOP = 640;
-    let pos = 0;  // next sample to send
-    sendTimer = setInterval(() => {
-      if (player.paused || player.seeking) return;
-      const target = Math.min(pcm.length, Math.floor(player.currentTime * 16000));
-      if (target < pos || target - pos > 16000) pos = Math.max(0, target - HOP);  // seek: resume from here
-      for (; pos + HOP <= target; pos += HOP) send(pcm.slice(pos, pos + HOP));
-    }, 20);
-    an = pcmAnalyser(pcm, () => player.currentTime * 16000, 4096);
+    src = ctx.createMediaElementSource(player);
+    src.connect(ctx.destination);  // you hear the file as normal
+    let tail = src;
+    for (let i = 0; i < 2; i++) {  // anti-alias before the worklet's downsampling
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 7000; lp.Q.value = 0.7;
+      tail.connect(lp); tail = lp;
+    }
+    tail.connect(node);
     window.sheet?.setLocal?.({ name: file.name, time: () => player.currentTime, playing: () => !player.paused,
                              duration: () => player.duration });
   } else {
-    setStatus('Starting audio…');
-    ctx = primed && primed.state !== 'closed' ? primed : primeAudio(false);
-    primed = null;  // this session owns it now
-    await withTimeout(ctx.resume(), 10000, 'starting audio (tap the button again)');
-    await withTimeout(ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([worklet], { type: 'application/javascript' }))),
-                      10000, 'loading the audio processor');
-    const node = new AudioWorkletNode(ctx, 'tap', {
-      processorOptions: { inRate: ctx.sampleRate }, channelCount: 1, channelCountMode: 'explicit', channelInterpretation: 'speakers',
-    });
-    const src = ctx.createMediaStreamSource(new MediaStream(audio));
+    src = ctx.createMediaStreamSource(new MediaStream(audio));
     src.connect(node);
-    node.port.onmessage = (m) => send(m.data);
-    an = ctx.createAnalyser(); an.fftSize = 4096; an.smoothingTimeConstant = 0.6;
-    src.connect(an);
-    sr = ctx.sampleRate;
   }
+  node.port.onmessage = (m) => {
+    if (ws.readyState !== 1) return;
+    ws.send(m.data.buffer);
+    sentAt.push(performance.now());
+    if (sentAt.length > 50) sentAt.shift();
+  };
+  const an = ctx.createAnalyser(); an.fftSize = file ? 8192 : 4096; an.smoothingTimeConstant = 0.6;
+  src.connect(an);
 
   let raf, drawErr = false;
   const loop = () => {
@@ -671,9 +629,8 @@ async function startInner(source, label) {
   session = (msg = 'Stopped', kind = '') => {
     cancelAnimationFrame(raf);
     stopStream();
-    clearInterval(sendTimer);
     if (player) { player.pause(); $('playerrow').replaceChildren(); URL.revokeObjectURL(fileUrl); window.sheet?.setLocal?.(null); }
-    ctx?.close(); ws.onclose = null; ws.close();
+    ctx.close(); ws.onclose = null; ws.close();
     document.body.classList.remove('live-mode', 'file-mode');
     setButtons(true);
     $('sig').textContent = 'No input'; $('sig').className = 'none';
@@ -752,7 +709,7 @@ $('mic').onclick = () => {
   }, label);
 };
 
-$('filebtn').onclick = () => $('file').click();  // files need no AudioContext (see startInner)
+$('filebtn').onclick = () => { primeAudio(true); $('file').click(); };
 $('file').onchange = () => {
   const f = $('file').files[0];
   $('file').value = '';  // allow choosing the same file again later
