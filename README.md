@@ -1,7 +1,7 @@
 # chordstream
 
 Real-time chord recognition from live audio. Each 40 ms of audio produces one decision, computed
-only from audio already heard. The live model (v10) names the chord of the audio 120 ms ago: that
+only from audio already heard. The live model (v11) names the chord of the audio 120 ms ago: that
 short, trained-in delay lets each decision hear a little of what follows, which removes much of
 the flicker at chord changes. It names 108 chords (12 roots × maj, min, 7, maj7, m7, dim, aug,
 sus2, sus4) plus "no chord", and is trained on human-labelled data only: US Billboard hits plus
@@ -61,7 +61,7 @@ chord".
   - Each block halves the pitch resolution, from 144 bins down to 18 positions × 64 learned
     features. Each output sees 13 frames (~0.5 s).
 - **Context (a Transformer):**
-  - 4 layers; at each layer the current frame can attend to up to the previous 128 frames (~5 s), and
+  - 4 layers; at each layer the current frame can attend to up to the previous 400 frames (~16 s, about 8 bars), and
     nearer frames count more.
   - This is where musical context enters. If the last few seconds were clearly A major, an ambiguous
     frame leans towards the chords that fit.
@@ -108,9 +108,10 @@ around. The key decides spelling (C♯m in E major, D♭ in A♭ major) and is s
 timeline. It doesn't improve chord accuracy (E05, E16), so it is display-only.
 
 **Known weaknesses** (being worked on; see [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)):
-- **Bass dependence:** v9 fell to 47% on Bollywood without bass (F07). v10, trained with random EQ
-  and bass dropout (E32b), holds 58.5%, and 71.9% with only the bass guitar range removed. Inverted
-  chords (C/E) are still named after their bass note about half the time; dropout doesn't fix that.
+- **Bass dependence:** v9 fell to 47% on Bollywood without bass (F07). v10/v11, trained with random EQ
+  and bass dropout (E32b, E34b), hold 57–59%, and 70–72% with only the bass guitar range removed.
+  Inverted chords (C/E) are still named after their bass note about half the time (v11: 50% right,
+  up from 44% thanks to the longer context).
 - **Brief wrong flashes:** about 6 per minute in the live chord, mostly to the chord a fourth or fifth
   away (F04). The Steady display hides most of them.
 - **Room echo:** costs about 5 pt of accuracy but adds no flicker (F06).
@@ -228,8 +229,8 @@ Every experiment behind these choices is in [docs/EXPERIMENTS.md](docs/EXPERIMEN
 Trained bundles are attached to GitHub Releases, so they don't bloat git history:
 
 ```powershell
-gh release download model-v10 --pattern "*.zip" --dir models
-Expand-Archive models/chordstream-v10.zip models; uv run chordstream serve --bundle models/v10
+gh release download model-v11 --pattern "*.zip" --dir models
+Expand-Archive models/chordstream-v11.zip models; uv run chordstream serve --bundle models/v11
 ```
 
 They were trained on copyrighted recordings, so keep them for personal use.
@@ -266,16 +267,17 @@ uv run chordstream build-ext                    # -> data/cache_ext
 #    powershell -File experiments/2026-11-12_bollywood_scale.ps1 collects songs -> data/cache_bolly3;
 #    experiments/2026-11-12_bollywood_scaled_train.ps1 builds data/cache_ext_bolly3x2
 
-# 7. Train the live recipe (v10 = E32b: v9 + random EQ + bass dropout), evaluate, export
+# 7. Train the live recipe (v11 = E34b: v10 recipe with 16 s attention context, batch 16), evaluate, export
 uv run chordstream train --init models/latest --cache data/cache_ext_bolly3x2 --vocab extended --label-delay 3 `
-    --lr 3e-4 --epochs 80 --crops 2000 --transition-weight 3 --random-eq 0.5 --bass-dropout 0.3 --out models/v10
-uv run python experiments/hmm55.py models/v10   # deployed HMM (5 s / power 2, see EXPERIMENTS E25) -> models/v10_h5p2
-uv run chordstream evaluate models/v10_h5p2 --cache data/cache_ext
-uv run python experiments/analysis_bollywood.py --v3 models/v10_h5p2   # 61 Bollywood test songs
-uv run python experiments/analysis_bass.py models/v10_h5p2            # robustness without bass
-uv run chordstream export models/v10_h5p2       # ONNX + parity check
+    --lr 3e-4 --epochs 80 --crops 2000 --transition-weight 3 --random-eq 0.5 --bass-dropout 0.3 `
+    --context 400 --batch-size 16 --out models/v11
+uv run python experiments/hmm55.py models/v11   # deployed HMM (5 s / power 2, see EXPERIMENTS E25) -> models/v11_h5p2
+uv run chordstream evaluate models/v11_h5p2 --cache data/cache_ext
+uv run python experiments/analysis_bollywood.py --v3 models/v11_h5p2   # 61 Bollywood test songs
+uv run python experiments/analysis_bass.py models/v11_h5p2            # robustness without bass
+uv run chordstream export models/v11_h5p2       # ONNX + parity check
 
-# 8. Run (default bundle: models/v10)
+# 8. Run (default bundle: models/v11)
 uv run chordstream transcribe song.wav --ref song.lab --print   # simulated live stream + latency stats
 uv run chordstream mic                                           # local input device
 uv run chordstream serve                                         # http://localhost:8000 browser demo, ws://…/ws
@@ -375,24 +377,27 @@ against the hand-corrected labels instead of the aligned ones.
 
 ## Results
 
-The live model is **v10**: v9's recipe (extended vocabulary, 120 ms label delay, human labels only,
-Billboard + 152 Bollywood songs) trained with **random EQ** and **bass dropout**, so chords come from
-the harmony rather than the bass line. It gives up under a point on normal audio for large gains
-when the bass is missing (E31/E32). Models are chosen by cost-benefit across both test sets.
+The live model is **v11**: v10's recipe (extended vocabulary, 120 ms label delay, human labels only,
+Billboard + 152 Bollywood songs, **random EQ** and **bass dropout** so chords come from the harmony
+rather than the bass line) with **16 s of attention context** instead of 5 s (E34b). The longer
+context gains about 2 points on normal audio and 6 on inverted chords. Models are chosen by
+cost-benefit across both test sets.
 
-| | v10 (live) | v9 | v7 |
-|---|---|---|---|
-| Bollywood, 61 test songs, majmin / full | 79.1% / 76.5% | **80.0% / 77.4%** | 60.7% / 54.0% |
-| Bollywood, bass removed below 150 / 300 Hz | **71.9% / 58.5%** | 66.8% / 46.8% | – |
-| Billboard, 36 clean held-out songs, majmin / full | 79.5% / 66.8% | 80.2% / 67.7% | **83.3% / 73.0%** |
-| Billboard, bass removed below 150 / 300 Hz | **78.1% / 71.0%** | 76.4% / 65.2% | – |
-| **Overall** (mean of the two test sets, majmin) | 79.3% | **80.1%** | 72.0% |
-| Chord sheet (480 ms hold, v7) | – | – | 83.4% majmin, 1.03× changes |
+| | v11 (live) | v10 | v9 | v7 |
+|---|---|---|---|---|
+| Bollywood, 61 test songs, majmin / full | **81.0% / 78.4%** | 79.1% / 76.5% | 80.0% / 77.4% | 60.7% / 54.0% |
+| Bollywood, bass removed below 150 / 300 Hz | 70.5% / 56.9% | **71.9% / 58.5%** | 66.8% / 46.8% | – |
+| Billboard, 36 clean held-out songs, majmin / full | 81.5% / 71.0% | 79.5% / 66.8% | 80.2% / 67.7% | **83.3% / 73.0%** |
+| Billboard, bass removed below 150 / 300 Hz | **79.6% / 72.6%** | 78.1% / 71.0% | 76.4% / 65.2% | – |
+| Inverted chords (C/E), Billboard | **49.7%** | 43.5% | 46.6% | – |
+| Steady display, chord changes per minute (Billboard / Bollywood; songs: 28 / 41) | 33.8 / 43.3 | 36.7 / 38.7 | – | – |
+| **Overall** (mean of the two test sets, majmin) | **81.3%** | 79.3% | 80.1% | 72.0% |
+| Chord sheet (480 ms hold, v7) | – | – | – | 83.4% majmin, 1.03× changes |
 
 Bollywood accuracy is measured against sheet-aligned labels (about 82–84% accurate when checked on
 Billboard); hand-corrected gold labels from the annotate page replace them song by song. The
-first fine-tuned model scored 73.8% on Billboard's original 10. A step costs about 2.4 ms of CPU per
-40 ms frame. Every experiment, including the ones that didn't help, is in
+first fine-tuned model scored 73.8% on Billboard's original 10. A step costs about 4.4 ms of CPU per
+40 ms frame (v11; 3.0 ms with v10's 5 s context). Every experiment, including the ones that didn't help, is in
 **[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)**, with commands and decisions. The batch scripts
 are in [`experiments/`](experiments/).
 

@@ -57,20 +57,21 @@ Comparisons inside one experiment always use the same set. Differences under ~0.
 | v6 (extended vocab) | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v6)) | 79.9% | 80.8% (36 clean); 70.3% full vocab | 1.6× | +80 ms | E18 |
 | teacher (offline, sees ±5 s) | never | 82.0% | 82.9% (36 clean) | 1.04× | – | E17 |
 | E23b (label delay 240 ms, human labels) | candidate | 83.0% | 83.9% (36 clean) | 1.44× | +240 ms display | E23 |
-| **v10** (v9 + random EQ + bass dropout) | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v10)) | – | 79.5% majmin, 66.8% full (36 clean); 78.1 / 71.0% without bass < 150 / 300 Hz; **Bollywood 79.1% / 76.5%** (61), 71.9 / 58.5% without bass | 1.68× | 120 ms display | E32b |
+| **v11** (v10 + 16 s attention context) | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v11)) | – | 81.5% majmin, 71.0% full (36 clean); 79.6 / 72.6% without bass < 150 / 300 Hz; inverted 49.7%; **Bollywood 81.0% / 78.4%** (61), 70.5 / 56.9% without bass | 1.56× | 120 ms display | E34b |
+| v10 (v9 + random EQ + bass dropout) | superseded ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v10)) | – | 79.5% majmin, 66.8% full (36 clean); 78.1 / 71.0% without bass < 150 / 300 Hz; **Bollywood 79.1% / 76.5%** (61), 71.9 / 58.5% without bass | 1.68× | 120 ms display | E32b |
 | v9 (v7 recipe + 152 Bollywood songs ×2, cleaned sheet labels) | superseded ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v9)) | 77.1% majmin | 80.2% majmin, 67.7% full (36 clean); **Bollywood 80.0% / 77.4%** (61) | 1.62× | 120 ms display | E28b |
 | v8 (v7 + 47 Bollywood songs, cleaned sheet labels) | superseded ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v8)) | 79.6% majmin | 81.8% majmin, 70.5% full (36 clean); **Bollywood 80.0% / 78.0%** (23) | 1.56× | 120 ms display | E21e |
 | E24 (extended, human labels) | baseline | 80.9% majmin | 81.0% majmin, 70.7% full (36 clean) | 1.71× | +80 ms | E24 |
 | v7 (extended, 120 ms label delay, human labels) | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v7)) | **83.1%** majmin | **83.3% majmin, 73.0% full (36 clean)** | 1.48× | 120 ms display | E25 |
 
-Biggest wins: real data (E03, +28 pts over synthetic only), Bollywood songs with cleaned sheet-aligned labels (E21, +11 pts on Bollywood, +4.8 overall), training budget (E13/E15, +2.4),
+Biggest wins: real data (E03, +28 pts over synthetic only), 16 s attention context (E34, +1.9 overall, +6 on inversions), Bollywood songs with cleaned sheet-aligned labels (E21, +11 pts on Bollywood, +4.8 overall), training budget (E13/E15, +2.4),
 a trained-in 120 ms label delay (E23/E25, +2.5 majmin and fewer flips), more data (E08, +2),
 transition loss (E09, lag 120 → 40–80 ms), and a 480 ms hold for the chord sheet (F03, changes
 1.6× → 1.03×). Distillation gave +0.7 (E17) but is no longer used (policy above; E24 showed no
 gain on the extended model).
 Things that did **not** help: beat or key priors in the HMM, a faster frontend, a bigger model
 at the old learning rate, re-timing labels (for training), data beyond ~200 songs at the old
-training budget, drum suppression (E19), a stability loss (E22), draft/verify "speculative"
+training budget, drum suppression (E19), a learned raw-waveform front end instead of the CQT (E33, −4), re-tuning HMM stickiness for flicker (F09), a stability loss (E22), draft/verify "speculative"
 display (F02), a second longer-delay head (E26), and per-beat averaging once the model has
 look-ahead (F03).
 
@@ -762,7 +763,7 @@ Dates are the day the experiment ran.
   cost-benefit rule: "if we're seeing massive improvement in one sector while minor regression
   overall then it's worth switching".
 
-### E33 · Learned raw-waveform front end (user idea) · 2026-11-12 — running
+### E33 · Learned raw-waveform front end (user idea) · 2026-11-12 — `models/e33a_raw_init`, `models/e33b_raw_scratch`
 
 - **Code:** [`chordstream/rawfront.py`](../src/chordstream/rawfront.py) and
   [`experiments/train_raw.py`](../experiments/train_raw.py); raw audio is cached by
@@ -774,11 +775,66 @@ Dates are the day the experiment ran.
   - Pitch shift is done by resampling, with the labels time-stretched to match.
 - **Runs:** a: ChordNet from `models/latest`, front end random; b: everything from scratch.
 - **Question:** can a network learn its own pitch analysis as well as the CQT?
+- **Result** (majmin, v9's HMM; flicker from F08 below):
 
-### E34 · 16 s attention context · 2026-11-12 — queued after E33
+  | | Billboard | Bollywood | Steady changes/min (BB / Bolly) | live blips/min (BB / Bolly) |
+  |---|---|---|---|---|
+  | v9 (CQT) | **80.2%** | **80.0%** | – | – |
+  | v10 (CQT) | 79.5% | 79.1% | 36.7 / 38.7 | 6.3 / 10.0 |
+  | E33a (raw, ChordNet init) | 76.3% | 76.0% | 37.0 / 38.0 | 7.5 / 10.5 |
+  | E33b (raw, scratch) | 75.2% | 75.6% | 37.3 / 39.1 | 7.7 / 10.3 |
 
-- **Setup:** v9's recipe with `--context 400` (16 s, about 8 bars at 120 BPM) instead of 128 (5 s),
-  batch 16. Prompted by a pipeline description the user shared that suggests 4–8 bars of context.
+- **Findings:** 3–5 pt worse than the CQT, and no steadier (slightly jumpier live; equal after the
+  Steady display). With ~600 training songs the CQT's semitone-aligned bins are a strong prior that
+  learned filters don't recover. The model's bass reliance is a label shortcut (root = bass in most
+  training frames), not a CQT property: the CQT has no loudness weighting and gives every octave 24
+  bins.
+- **Decision:** keep the CQT. If revisited: initialise the conv filters as the CQT kernels
+  (starts at CQT accuracy, learns only where the data supports it).
+
+### F08 · Flicker of the raw-waveform models · 2026-11-12
+- **Script:** [`analysis_raw_flicker.py`](../experiments/analysis_raw_flicker.py); live HMM path and the
+  deployed Steady display (evidence hold k20 t0.05) on both test sets. Results in the E33 and E34
+  tables. Reference: the labels themselves change 28.1 / 41.2 times per minute (Billboard /
+  Bollywood; Bollywood's sheet-aligned labels have 29% segments < 0.5 s).
+
+### F09 · HMM stickiness re-tuned for flicker · 2026-11-12
+- **Script:** [`analysis_hmm_grid.py`](../experiments/analysis_hmm_grid.py) on v10: mean chord
+  3 / 5 / 8 / 12 / 20 s × emission power 1 / 1.5 / 2 / 3.
+- **Result:** the Steady display barely moves: 34.5–36.8 changes/min on Billboard and 37.0–38.7 on
+  Bollywood across the whole grid. 5 s → 20 s cuts live changes by only ~2/min; the network's
+  posteriors are confident enough to swamp the transition prior. Lower power calms the live chord
+  (48 → 40/min on Billboard at power 1) but costs ~1.5 pt on Bollywood.
+- **Decision:** keep 5 s / power 2. Remaining flicker comes from the network; next idea is a
+  duration-aware hold (a chord's exit threshold grows with how long it has played).
+
+### E34 · 16 s attention context · 2026-11-12 — `models/e34_ctx400`, `models/e34b_ctx400_eq` → `v11`
+
+- **Scripts:** [`2026-11-12_raw_and_context.ps1`](../experiments/2026-11-12_raw_and_context.ps1) (E34),
+  [`2026-11-12_context_eq.ps1`](../experiments/2026-11-12_context_eq.ps1) (E34b).
+- **Setup:** `--context 400` (16 s, about 8 bars at 120 BPM) instead of 128 (5 s), batch 16, same init
+  (`models/latest`) and data as v9. Prompted by a pipeline description the user shared that suggests
+  4–8 bars of context. E34 uses v9's recipe; E34b adds v10's random EQ 0.5 + bass dropout 0.3.
+  (One E34 epoch shows 25267 s: the PC slept; training resumed normally.)
+- **Result** (majmin, HMM 5 s / power 2):
+
+  | | Billboard clean | Billboard no bass < 150 / < 300 Hz | inverted | Bollywood clean | Bollywood no bass < 150 / < 300 Hz | **overall clean** | Steady changes/min (BB / Bolly) |
+  |---|---|---|---|---|---|---|---|
+  | v9 | 80.2% | 76.4 / 65.2% | 46.6% | 80.0% | 66.8 / 46.8% | 80.1% | – |
+  | v10 | 79.5% | 78.1 / 71.0% | 43.5% | 79.1% | **71.9 / 58.5%** | 79.3% | 36.7 / 38.7 |
+  | E34 | **82.1%** | 78.6 / 65.9% | **52.0%** | **81.8%** | 65.7 / 43.7% | **82.0%** | 33.1 / 46.8 |
+  | **E34b** | 81.5% | **79.6 / 72.6%** | 49.7% | 81.0% | 70.5 / 56.9% | 81.3% | 33.8 / 43.3 |
+
+- **Findings:**
+  - Longer context is the biggest clean gain since Bollywood data: +1.9 pt over v9 with only the
+    context changed, and +6 to +8 pt on inverted chords.
+  - Without EQ/dropout it loses v10's no-bass robustness; E34b keeps most of it (Billboard no-bass
+    even improves; Bollywood no-bass −1.5 pt vs v10).
+  - Billboard flickers less; Bollywood's Steady display changes more often (43 vs 39/min), close to
+    the labels' own rate (41/min).
+  - CPU per step 4.4 ms vs 3.0 ms (budget 40 ms). Full vocabulary: Billboard 71.0%, Bollywood 78.4%.
+- **Decision:** deployed **E34b as v11** (+2.0 pt overall clean, inversions +6 pt, no-bass within
+  1.5 pt of v10; ONNX parity 2.86e-06).
 
 ### D01 · Key-aware chord spelling (display) · 2026-11-12
 - Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`
@@ -814,7 +870,10 @@ Dates are the day the experiment ran.
 | `e21a_live` | E21 | `e21a_bolly` + HMM 5 s / power 2, exported; was on trial in the UI; safe to delete |
 | `v8` | E21e | previous live model, release `model-v8` (= `e21e_bolly_clean` + HMM 5 s / power 2) |
 | `v9` | E28b | previous live model, release `model-v9` (= `e28b_bolly3x2` + HMM 5 s / power 2) |
-| `v10` | E32b | **live**, release `model-v10` (= `e32b_eq5_bass3` + HMM 5 s / power 2) |
+| `v10` | E32b | previous live model, release `model-v10` (= `e32b_eq5_bass3` + HMM 5 s / power 2) |
+| `v11` | E34b | **live**, release `model-v11` (= `e34b_ctx400_eq` + HMM 5 s / power 2) |
+| `e33a_raw_init`, `e33b_raw_scratch` | E33 | raw-waveform front end; not deployed |
+| `e34_ctx400`, `e34b_ctx400_eq` (+ `_h5p2`) | E34 | 16 s context; e34b = v11 |
 | `e31a_bassdrop3`, `e31b_bassdrop6`, `e32a_eq5`, `e32b_eq5_bass3` (+ `_h5p2`) | E31, E32 | bass dropout / random EQ; e32b = v10 |
 | `e21c_bolly_mask3`, `e21d_bolly_mask1`, `e21e_bolly_clean`, `e21f_bolly_clean_rare` | E21 | Bollywood variants (e21e = v8) |
 | `e28a_bolly3x1`, `e28b_bolly3x2` (+ `_h5p2` eval copies) | E28 | scaled Bollywood mixes; e28b = v9 |

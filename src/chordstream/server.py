@@ -23,7 +23,7 @@ from .nowplaying import now_playing
 from .stream import ChordStream
 from .vocab import CLASS_NAMES
 
-BUNDLE = os.environ.get("CHORDSTREAM_BUNDLE", "models/v10")
+BUNDLE = os.environ.get("CHORDSTREAM_BUNDLE", "models/v11")
 ONLY_CHANGES = os.environ.get("CHORDSTREAM_ONLY_CHANGES", "0") == "1"
 ASR_MODEL = os.environ.get("CHORDSTREAM_ASR", "off")  # e.g. "small"; "off" disables vocal alignment
 WEB_DIR = Path(__file__).parent / "web"
