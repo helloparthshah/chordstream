@@ -352,3 +352,56 @@ def mask_boundaries(src: str | Path = "data/cache_bolly", out: str | Path = "dat
         np.savez_compressed(out / f.name, **d)
         n += 1
     return n
+
+
+def stage_cache_clean(out: str | Path = "data/cache_bolly2", bass_weight: float = 0.5, keep: float = 0.7,
+                      capo_tolerance: float = 0.05, device: str | None = None) -> dict:
+    """Cleaner labels (E21 cleaning, measured on Billboard: 77.6% -> 82.1% full / 83.7% majmin on kept frames):
+      * bass evidence in the alignment (weight 0.5),
+      * key: the sheet's capo transposition is used when its per-frame log-likelihood is within
+        `capo_tolerance` of the best one (fixes the fifth confusion); songs where it isn't are dropped,
+      * the least-confident (1 - keep) of frames, pooled over all songs, are set to IGNORE.
+    Reuses the CQT features already in data/cache_bolly. Writes align2.jsonl."""
+    from ..vocab import CLASS_NAMES, NO_ROOT, parse_harte_ext, to_majmin
+    from .sheet_align import align_ordered, frame_confidence
+
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    recs, items = [], []
+    for s in songs():
+        src = Path("data/cache_bolly") / f"bolly__{s['id']}.npz"
+        sh = ROOT / "sheets" / f"{s['id']}.json"
+        if not (src.exists() and sh.exists()):
+            continue
+        sheet = json.loads(sh.read_text(encoding="utf-8"))
+        feats = np.load(src)["feats"].astype(np.float32)
+        r = align_ordered(feats, sheet["chords"], jumps=sheet["line_starts"], bass_weight=bass_weight)
+        capo = (sheet.get("capo") or 0) % 12
+        gap = (r["ll"] - r["all"][capo]["ll"]) / len(feats)
+        use = r["all"][capo] if gap <= capo_tolerance else None
+        rec = {"id": s["id"], "song": s["song"], "best_shift": r["shift"], "capo": capo, "gap": round(gap, 4),
+               "kept": use is not None}
+        recs.append(rec)
+        if use is None:
+            continue
+        conf = frame_confidence(use["labels"], use["cos"], use["states"])
+        items.append((s["id"], feats, use["labels"].astype(np.int64), conf))
+        print(f"  {s['song']}: capo {capo} best {r['shift']} gap {gap:.3f}", flush=True)
+    thr = np.quantile(np.concatenate([c for *_, c in items]), 1 - keep)
+    for sid, feats, lab, conf in items:
+        ext = {c: (parse_harte_ext(CLASS_NAMES[c]) if c != NO_CHORD else (NO_CHORD, NO_ROOT, NO_ROOT, 0)) for c in set(lab.tolist())}
+        low = conf < thr
+        labels = np.where(low, IGNORE, lab).astype(np.int16)
+        root = np.where(low, IGNORE, [ext[c][1] for c in lab]).astype(np.int16)
+        bass = np.where(low, IGNORE, [ext[c][2] for c in lab]).astype(np.int16)
+        notes = np.where(low, -1, [ext[c][3] for c in lab]).astype(np.int32)
+        mm = np.where(low, IGNORE, [to_majmin(c) for c in lab]).astype(np.int16)
+        np.savez_compressed(out / f"bolly__{sid}.npz", feats=feats.astype(np.float16), labels=labels, root=root,
+                            bass=bass, notes=notes, labels_mm=mm, labels_full=lab.astype(np.int16))
+    (ROOT / "align2.jsonl").write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+    return {"songs": len(recs), "kept": len(items), "threshold": float(thr)}
+
+
+def trusted_ids_v2() -> set[str]:
+    rows = [json.loads(l) for l in (ROOT / "align2.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+    return {r["id"] for r in rows if r["kept"]}

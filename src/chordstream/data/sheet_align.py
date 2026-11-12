@@ -131,9 +131,30 @@ def ordered_viterbi(cos: np.ndarray, seq: list[int], states: list[int], p_stay: 
     return np.array(seq)[path], float(delta.max())
 
 
+def bass_chroma(feats: np.ndarray, bins_per_semitone: int = 2, octaves: int = 2, width: int = 9) -> np.ndarray:
+    """Pitch-class energy of the lowest `octaves` (C2-B3): where the chord root usually sounds."""
+    nb = 12 * bins_per_semitone * octaves
+    x = feats[:, :nb]
+    pcs = (np.arange(nb) // bins_per_semitone) % 12
+    b = np.stack([x[:, pcs == pc].sum(1) for pc in range(12)], 1)
+    k = np.ones(width, np.float32) / width
+    b = np.stack([np.convolve(b[:, i], k, mode="same") for i in range(12)], 1)
+    b = b - b.mean(1, keepdims=True)
+    return b / (np.linalg.norm(b, axis=1, keepdims=True) + 1e-6)
+
+
+def _root(c: int) -> int | None:
+    d = decode_ext(c)
+    return None if d is None else d[0]
+
+
 def align_ordered(feats: np.ndarray, seq: list[int], bins_per_semitone: int = 2, frame_seconds: float = 0.04,
-                  mean_chord_seconds: float = 2.0, beta: float = 8.0, shifts=range(12), jumps=None) -> dict:
+                  mean_chord_seconds: float = 2.0, beta: float = 8.0, shifts=range(12), jumps=None,
+                  bass_weight: float = 0.0) -> dict:
+    """Best transposition first; every shift's result is kept in "all" (for capo checks). The
+    returned dict also carries the per-frame emission matrix ("cos", "states") for confidence."""
     ch = smooth_chroma(feats, bins_per_semitone)
+    bch = bass_chroma(feats, bins_per_semitone) if bass_weight else None
     energy = feats.mean(1)
     quiet = energy < np.percentile(energy, 5) * 1.05
     p_stay = 1 - frame_seconds / mean_chord_seconds
@@ -143,14 +164,49 @@ def align_ordered(feats: np.ndarray, seq: list[int], bins_per_semitone: int = 2,
         states = sorted(set(sq))
         tpl = np.stack([template(c) for c in states])
         cos = ch @ tpl.T
-        cos[:, states.index(NO_CHORD)] = np.where(quiet, 0.6, 0.15)
+        if bch is not None:
+            roots = [_root(c) for c in states]
+            cos = cos + bass_weight * np.stack([bch[:, r] if r is not None else np.zeros(len(ch)) for r in roots], 1)
+        cos[:, states.index(NO_CHORD)] = np.where(quiet, 0.6, 0.15) * (1 + bass_weight)
         jj = None if jumps is None else [j + 1 for j in jumps]
         lab, ll = ordered_viterbi(cos, sq, states, p_stay, beta, jumps=jj)
         sidx = np.searchsorted(states, lab)
         on = lab != NO_CHORD
         fit = float(cos[np.arange(len(lab)), sidx][on].mean()) if on.any() else 0.0
-        results.append({"shift": k, "labels": lab, "ll": ll, "fit": fit})
-    results.sort(key=lambda r: -r["ll"])
-    best = results[0]
-    best["margin"] = (best["ll"] - results[1]["ll"]) / len(feats) if len(results) > 1 else None
+        results.append({"shift": k, "labels": lab, "ll": ll, "fit": fit, "cos": cos, "states": states})
+    order = sorted(range(len(results)), key=lambda i: -results[i]["ll"])
+    best = dict(results[order[0]])
+    best["margin"] = (best["ll"] - results[order[1]]["ll"]) / len(feats) if len(results) > 1 else None
+    best["all"] = {r["shift"]: r for r in results}
     return best
+
+
+def snap_to_beats(labels: np.ndarray, beat_frames: np.ndarray, radius: int = 6) -> np.ndarray:
+    """Move every chord change to the nearest beat within +-radius frames (chords change on beats)."""
+    out = labels.copy()
+    changes = np.flatnonzero(np.diff(labels) != 0) + 1
+    if not len(beat_frames):
+        return out
+    for c in changes:
+        j = np.searchsorted(beat_frames, c)
+        cand = [b for b in beat_frames[max(0, j - 1): j + 1] if abs(b - c) <= radius]
+        if not cand:
+            continue
+        b = min(cand, key=lambda x: abs(x - c))
+        if b < c:
+            out[b:c] = labels[c]
+        elif b > c:
+            out[c:b] = labels[c - 1]
+    return out
+
+
+def frame_confidence(labels: np.ndarray, cos: np.ndarray, states: list[int], width: int = 13) -> np.ndarray:
+    """Per-frame margin: emission of the aligned chord minus the best *other* sheet chord, smoothed.
+    Low = the audio doesn't clearly support the aligned chord there."""
+    sidx = np.searchsorted(states, labels)
+    own = cos[np.arange(len(labels)), sidx]
+    other = cos.copy()
+    other[np.arange(len(labels)), sidx] = -np.inf
+    m = own - other.max(1)
+    k = np.ones(width) / width
+    return np.convolve(m, k, mode="same")

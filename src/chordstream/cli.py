@@ -83,6 +83,8 @@ def cmd_bollywood(a):
         print(b.stage_audio(a.cookies_from_browser))
     elif a.stage == "cache":
         print(b.stage_cache(a.out))
+    elif a.stage == "clean":
+        print(b.stage_cache_clean())
 
 
 def cmd_train(a):
@@ -312,7 +314,7 @@ def main(argv=None):
     s.set_defaults(fn=cmd_features)
 
     s = sp.add_parser("bollywood", help="E21: Bollywood songs + UG sheets -> aligned labels")
-    s.add_argument("stage", choices=["songs", "sheets", "validate", "audio", "cache"])
+    s.add_argument("stage", choices=["songs", "sheets", "validate", "audio", "cache", "clean"])
     s.add_argument("--year-from", type=int, default=2010)
     s.add_argument("--year-to", type=int, default=2024)
     s.add_argument("--per-year", type=int, default=25)

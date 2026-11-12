@@ -7,9 +7,11 @@ Timing-free sheet metrics (from the UG sheet, transposed by the aligner's chosen
 Secondary: frame accuracy against the sheet-aligned labels (majmin view and full vocabulary).
 Predictions are the live HMM path (what the readout shows), at the frames they describe.
 
-Only songs whose alignment transposition matches the sheet's capo (bollywood.trusted_ids).
+Benchmarks: "v1" = data/cache_bolly, songs whose aligned transposition matched the capo
+(bollywood.trusted_ids); "v2" (default from E21 cleaning on) = data/cache_bolly2: bass-aware
+alignment at the capo transposition, least-confident 30% of frames ignored (bollywood.trusted_ids_v2).
 
-usage: python experiments/analysis_bollywood.py models/v7 [models/x ...]
+usage: python experiments/analysis_bollywood.py [--v1] models/v7 [models/x ...]
 """
 import json
 import sys
@@ -19,14 +21,16 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from chordstream.data.bollywood import trusted_ids
+from chordstream.data.bollywood import trusted_ids, trusted_ids_v2
 from chordstream.evaluate import majmin_view
 from chordstream.export import load_net
 from chordstream.hmm import OnlineHMM
 from chordstream.train import predict_song
 from chordstream.vocab import IGNORE, NO_CHORD, to_majmin, transpose
 
-CACHE, ROOT = Path("data/cache_bolly"), Path("data/bollywood")
+ROOT = Path("data/bollywood")
+V1 = "--v1" in sys.argv
+CACHE = Path("data/cache_bolly" if V1 else "data/cache_bolly2")
 
 
 def is_test(stem: str) -> bool:
@@ -54,8 +58,9 @@ def segs(path: np.ndarray, min_frames: int = 12) -> list[int]:
 
 
 def main(bundles):
-    diag = {json.loads(l)["id"]: json.loads(l) for l in (ROOT / "align.jsonl").read_text(encoding="utf-8").splitlines()}
-    ok = trusted_ids()  # alignment key agrees with the sheet's capo
+    rows = [json.loads(l) for l in (ROOT / ("align.jsonl" if V1 else "align2.jsonl")).read_text(encoding="utf-8").splitlines() if l.strip()]
+    diag = {r["id"]: {"shift": r["shift"] if V1 else r["capo"]} for r in rows}
+    ok = trusted_ids() if V1 else trusted_ids_v2()
     files = [f for f in sorted(CACHE.glob("*.npz")) if is_test(f.stem) and f.stem.split("__")[-1] in ok]
     print(f"{len(files)} test songs")
     dev = "cuda" if torch.cuda.is_available() else "cpu"
@@ -80,7 +85,8 @@ def main(bundles):
             ref_seq = [c for i, c in enumerate(mm(chords)) if i == 0 or c != mm(chords)[i - 1]]
             pred_seq = [c for i, c in enumerate(mm(segs(path))) if i == 0 or c != mm(segs(path))[i - 1]]
             tot["cov"] += lcs(ref_seq, pred_seq); tot["seq"] += len(ref_seq)
-            tot["pc"] += (np.diff(path) != 0).sum(); tot["rc"] += (np.diff(y) != 0).sum()
+            yref = d["labels_full"].astype(np.int64) if "labels_full" in d.files else y  # unmasked, for change counts
+            tot["pc"] += (np.diff(path) != 0).sum(); tot["rc"] += (np.diff(yref) != 0).sum()
             p2, y2 = majmin_view(path, y); m = y2 != IGNORE
             tot["mm_c"] += (p2[m] == y2[m]).sum(); tot["mm_n"] += m.sum()
             m = y != IGNORE
@@ -91,4 +97,4 @@ def main(bundles):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    main([a for a in sys.argv[1:] if not a.startswith("--")])

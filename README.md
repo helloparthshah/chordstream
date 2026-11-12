@@ -90,7 +90,8 @@ flowchart TB
     RARE["Rare-chord renders<br/>sus2/sus4/dim/aug (E27)"] -. in progress .-> STU
     YT["YouTube top Bollywood<br/>songs by year"] --> SHEETS["Ultimate Guitar chord sheets<br/>(matched + checked)"]
     SHEETS --> JA["Jump alignment<br/>chroma templates, no neural model"]
-    JA -. "in progress (E21)" .-> STU
+    JA --> CLEAN["Label cleaning<br/>bass evidence, capo key,<br/>drop least-confident 30%"]
+    CLEAN -. "in progress (E21)" .-> STU
     STU --> EVAL["chordstream evaluate<br/>streaming-exact metrics"]
     EVAL --> EXP["ONNX export<br/>+ GitHub release"]
 ```
@@ -176,6 +177,7 @@ uv run chordstream bollywood sheets      # match UG "Chords" sheets (requests sp
 uv run chordstream bollywood validate    # drop look-alike / wrong-song matches
 uv run chordstream bollywood audio       # download matched songs (Firefox session)
 uv run chordstream bollywood cache       # CQT + sheet jump alignment -> data/cache_bolly
+uv run chordstream bollywood clean       # cleaner labels: bass-aware alignment, capo key, low-confidence frames ignored -> data/cache_bolly2
 ```
 
 The Bollywood stage fetches UG search and tab pages at a slow rate for personal research; check

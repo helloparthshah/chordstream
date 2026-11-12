@@ -465,7 +465,39 @@ Dates are the day the experiment ran.
 - **E21c / E21d** ([`2026-11-12_bollywood_masked.ps1`](../experiments/2026-11-12_bollywood_masked.ps1)):
   Bollywood labels ignored within ±320 ms of every aligned chord change
   (`bollywood.mask_boundaries`), 3× / 1× weight. Running.
-- **Overall (selection rule above), majmin:** v7 83.3 / 55.8 → mean **69.6%** (pooled per song
+- **E21c / E21d result** (v1 benchmark): in sheet 93.0% / 92.0%, coverage 74.1% / 74.0%, aligned
+  majmin 64.1% / 60.9%; Billboard 82.4% / 82.6% (bundle HMM). Less Billboard loss than E21a, but
+  lower agreement with the v1 labels, which reward copying the aligner's boundary errors.
+- **Label cleaning** (user request; [`experiments/analysis_label_cleaning.py`](../experiments/analysis_label_cleaning.py),
+  measured on the 36 Billboard songs with true timings, key given):
+
+  | aligner | full | majmin | frames kept |
+  |---|---|---|---|
+  | E21 aligner | 77.6% | 79.6% | 100% |
+  | + bass evidence (weight 0.5) | 78.7% | 80.4% | 100% |
+  | + beat snapping (±4 / ±8 frames) | 77.2% / 76.4% | – | worse (causal beats too rough) |
+  | bass + keep top 80% / **70%** / 60% by confidence | 81.1 / **82.1** / 83.5% | 82.7 / **83.7** / 84.7% | 80 / 70 / 60% |
+
+  Confidence = the aligned chord's emission minus the best other sheet chord's, smoothed over 0.5 s.
+  `chordstream bollywood clean` (`bollywood.stage_cache_clean`): bass 0.5; the capo transposition is
+  used whenever its likelihood is within 0.05/frame of the best (fixes the fifth confusion); the
+  least-confident 30% of frames (pooled) are ignored → `data/cache_bolly2`, **70 / 98** songs kept
+  (was 60). No neural model involved.
+- **v2 benchmark** (cleaned labels, 23 test songs; supersedes v1 for selection):
+
+  | model | in sheet | coverage | aligned majmin / full |
+  |---|---|---|---|
+  | v7 | 89.5% | 73.8% | 68.9% / 61.3% |
+  | E27b | 89.1% | 73.3% | 69.0% / 61.7% |
+  | E21a | 92.1% | 73.4% | **75.5% / 73.6%** |
+  | E21b | 92.6% | 73.9% | 75.0% / 72.9% |
+  | E21c | **93.0%** | 73.8% | 73.8% / 70.9% |
+  | E21d | 92.4% | **75.0%** | 73.2% / 67.6% |
+
+  v7's agreement rises from 55.8% to 68.9% with cleaner labels: most of the earlier gap was label
+  noise. **E21e / E21f** ([`2026-11-12_bollywood_clean.ps1`](../experiments/2026-11-12_bollywood_clean.ps1)):
+  train on the cleaned labels (×3), f also with E27b's 50 rare renders. Running.
+- **Overall (selection rule above, v1 benchmark), majmin:** v7 83.3 / 55.8 → mean **69.6%** (pooled per song
   73.8%); E21a 81.6 / 67.4 → **74.5%** (76.7%); E21b 81.1 / 65.2 → 73.2% (75.6%). E21a leads; final
   choice after E21c/d.
 
