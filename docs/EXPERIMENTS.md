@@ -57,10 +57,11 @@ Comparisons inside one experiment always use the same set. Differences under ~0.
 | v6 (extended vocab) | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v6)) | 79.9% | 80.8% (36 clean); 70.3% full vocab | 1.6× | +80 ms | E18 |
 | teacher (offline, sees ±5 s) | never | 82.0% | 82.9% (36 clean) | 1.04× | – | E17 |
 | E23b (label delay 240 ms, human labels) | candidate | 83.0% | 83.9% (36 clean) | 1.44× | +240 ms display | E23 |
+| **v8** (v7 + 47 Bollywood songs, cleaned sheet labels) | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v8)) | 79.6% majmin | 81.8% majmin, 70.5% full (36 clean); **Bollywood 80.0% / 78.0%** (23) | 1.56× | 120 ms display | E21e |
 | E24 (extended, human labels) | baseline | 80.9% majmin | 81.0% majmin, 70.7% full (36 clean) | 1.71× | +80 ms | E24 |
-| **v7** (extended, 120 ms label delay, human labels) | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v7)) | **83.1%** majmin | **83.3% majmin, 73.0% full (36 clean)** | 1.48× | 120 ms display | E25 |
+| v7 (extended, 120 ms label delay, human labels) | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v7)) | **83.1%** majmin | **83.3% majmin, 73.0% full (36 clean)** | 1.48× | 120 ms display | E25 |
 
-Biggest wins: real data (E03, +28 pts over synthetic only), training budget (E13/E15, +2.4),
+Biggest wins: real data (E03, +28 pts over synthetic only), Bollywood songs with cleaned sheet-aligned labels (E21, +11 pts on Bollywood, +4.8 overall), training budget (E13/E15, +2.4),
 a trained-in 120 ms label delay (E23/E25, +2.5 majmin and fewer flips), more data (E08, +2),
 transition loss (E09, lag 120 → 40–80 ms), and a 480 ms hold for the chord sheet (F03, changes
 1.6× → 1.03×). Distillation gave +0.7 (E17) but is no longer used (policy above; E24 showed no
@@ -496,7 +497,23 @@ Dates are the day the experiment ran.
 
   v7's agreement rises from 55.8% to 68.9% with cleaner labels: most of the earlier gap was label
   noise. **E21e / E21f** ([`2026-11-12_bollywood_clean.ps1`](../experiments/2026-11-12_bollywood_clean.ps1)):
-  train on the cleaned labels (×3), f also with E27b's 50 rare renders. Running.
+  train on the cleaned labels (×3; 47 training songs), f also with E27b's 50 rare renders.
+- **E21e / E21f result** (v2 benchmark; Billboard with HMM 5 s / power 2):
+
+  | model | Bollywood majmin / full | in sheet | coverage | Billboard majmin / full | **mean** | pooled (59 songs) |
+  |---|---|---|---|---|---|---|
+  | v7 | 68.9% / 61.3% | 89.5% | 73.8% | **83.3% / 73.0%** | 76.1% | 77.7% |
+  | E21a | 75.5% / 73.6% | 92.1% | 73.4% | 81.6% / 70.7% | 78.6% | 79.0% |
+  | E21c | 73.8% / 70.9% | 93.0% | 73.8% | 82.4% / 71.4% | 78.1% | 79.0% |
+  | **E21e** | **80.0% / 78.0%** | 92.8% | **76.6%** | 81.8% / 70.5% | **80.9%** | **81.1%** |
+  | E21f (+ rare) | 79.9% / 77.9% | **93.1%** | 76.1% | 81.4% / 69.9% | 80.7% | 80.8% |
+
+  E21e's aligned-label score may be flattered (trained on labels made the same way), but it also
+  leads on in-order coverage, which doesn't use the aligner's timing. E21f learns dim (32% recall)
+  at a small cost elsewhere.
+- **Decision:** deployed **E21e** as **v8** (HMM 5 s / power 2; release
+  [`model-v8`](https://github.com/helloparthshah/chordstream/releases/tag/model-v8)): +4.8 pt overall,
+  +11 pt majmin on Bollywood, −1.5 pt on Billboard (accepted under the selection rule).
 - **Overall (selection rule above, v1 benchmark), majmin:** v7 83.3 / 55.8 → mean **69.6%** (pooled per song
   73.8%); E21a 81.6 / 67.4 → **74.5%** (76.7%); E21b 81.1 / 65.2 → 73.2% (75.6%). E21a leads; final
   choice after E21c/d.
@@ -554,13 +571,15 @@ Dates are the day the experiment ran.
 | `bb_ft`, `v2`, `v3`, `v4` | E03, E09, E12, E15 | superseded; kept for comparison |
 | `v5` | E17 | previous live model, release `model-v5` |
 | `v6` | E18 | previous live model, release `model-v6` |
-| `v7` | E25 | **live**, release `model-v7` (= `e25a_ext_delay3` + HMM 5 s / power 2) |
+| `v7` | E25 | previous live model, release `model-v7` (= `e25a_ext_delay3` + HMM 5 s / power 2) |
 | `e25a_ext_delay3`, `e25b_ext_delay6` | E25 | extended label-delay models |
 | `e26a_sheet8`, `e26b_sheet12` | E26 | rejected; safe to delete |
 | `e27_rare` | E27 | rare-chord mix (150 renders); not deployed |
 | `e27b_rare50` | E27b | rare-chord mix (50 renders); candidate |
 | `e21a_bolly`, `e21b_bolly_ft` | E21 | Bollywood mix (scratch / fine-tune); Billboard regression, not deployed |
-| `e21a_live` | E21 | `e21a_bolly` + HMM 5 s / power 2, exported; **on trial in the UI** (2026-11-12, user request); release stays `model-v7` |
+| `e21a_live` | E21 | `e21a_bolly` + HMM 5 s / power 2, exported; was on trial in the UI; safe to delete |
+| `v8` | E21e | **live**, release `model-v8` (= `e21e_bolly_clean` + HMM 5 s / power 2) |
+| `e21c_bolly_mask3`, `e21d_bolly_mask1`, `e21e_bolly_clean`, `e21f_bolly_clean_rare` | E21 | Bollywood variants (e21e = v8) |
 | `teacher` | E17 | offline teacher for majmin distillation |
 | `exp_a`, `exp_b`, `exp_w2/3/5`, `exp_g10`, `synth_g10`, `exp_lr3`, `exp_big`, `synth_big`, `v4_clean`, `v4_orig`, `student` | E08–E17 | experiment outputs; safe to delete |
 | `ext_teacher` | E18 | offline teacher for extended-vocabulary distillation |
