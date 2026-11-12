@@ -573,9 +573,13 @@ async function startInner(source, label) {
   // from the worklet as it is heard (live, no lookahead). The /static/audiotest.html check showed
   // Android screen recorders capture this route.
   setStatus('Starting audio…');
-  const ctx = primed && primed.state !== 'closed' ? primed : primeAudio(!!file);
+  // File: the context is created only now, after the file picker has closed. Opening it before the
+  // picker (in the tap) left Chrome on Android in a state where screen recorders got silence. It
+  // may start suspended (no gesture here); pressing play on the player resumes it.
+  const ctx = !file && primed && primed.state !== 'closed' ? primed : primeAudio(!!file);
   primed = null;  // this session owns it now
-  await withTimeout(ctx.resume(), 10000, 'starting audio (tap the button again)');
+  if (file) await withTimeout(ctx.resume(), 1500, 'resume').catch(() => {});
+  else await withTimeout(ctx.resume(), 10000, 'starting audio (tap the button again)');
   await withTimeout(ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([worklet], { type: 'application/javascript' }))),
                     10000, 'loading the audio processor');
   const sr = ctx.sampleRate;
@@ -646,7 +650,7 @@ async function startInner(source, label) {
   if (file) {
     document.body.classList.add('file-mode');
     player.onended = () => setStatus(`Finished · ${file.name}`, 'live');
-    player.onplay = () => setStatus(`Playing · ${file.name}`, 'live');
+    player.onplay = () => { ctx.resume().catch(() => {}); setStatus(`Playing · ${file.name}`, 'live'); };
     player.onpause = () => { if (!player.ended) setStatus(`Paused · ${file.name}`, ''); };
     try { await player.play(); } catch { setStatus(`Press play · ${file.name}`, ''); }
   } else {
@@ -709,7 +713,7 @@ $('mic').onclick = () => {
   }, label);
 };
 
-$('filebtn').onclick = () => { primeAudio(true); $('file').click(); };
+$('filebtn').onclick = () => $('file').click();  // the AudioContext is created after the picker closes (see startInner)
 $('file').onchange = () => {
   const f = $('file').files[0];
   $('file').value = '';  // allow choosing the same file again later
