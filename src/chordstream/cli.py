@@ -43,8 +43,13 @@ def cmd_fetch_billboard(a):
 
 
 def cmd_synth(a):
-    from .data.synth import builtin_progressions, render_dataset
+    from .data.synth import builtin_progressions, render_dataset, render_rare_dataset
     from .data.ug import load_progressions
+
+    if a.rare:
+        render_rare_dataset(a.out, a.n, seed=a.seed)
+        print(f"rendered {a.n} rare-chord songs -> {a.out}")
+        return
 
     progs = load_progressions(a.progressions) if a.progressions else builtin_progressions()
     progs = [p for p in progs if p]
@@ -54,7 +59,12 @@ def cmd_synth(a):
 
 def cmd_features(a):
     from .config import FrontendConfig
-    from .data.dataset import cache_features
+    from .data.dataset import cache_features, cache_features_ext
+
+    if a.extended:
+        n = sum(cache_features_ext(src, a.out, a.extended, FrontendConfig(gamma=a.gamma), a.device) for src in a.src)
+        print(f"cached {n} new songs (extended labels, prefix {a.extended}) -> {a.out}")
+        return
 
     n = cache_features(a.src, a.out, FrontendConfig(gamma=a.gamma), a.device)
     print(f"cached {n} new songs -> {a.out}")
@@ -155,6 +165,18 @@ def cmd_audit(a):
     print(f"audited {len(rows)} songs -> {a.out}; largest drift:")
     for r in worst:
         print(f"  {r['drift_s']:.2f}s  {r['artist'][:24]} - {r['title'][:32]}")
+
+
+def cmd_clean(a):
+    from .data.audit import clean_cache
+
+    print(clean_cache(a.cache, a.audit, a.out, a.max_drift))
+
+
+def cmd_build_ext(a):
+    from .data.dataset import build_extended_cache
+
+    print(build_extended_cache(a.labs, a.cache_orig, a.cache_clean, a.out))
 
 
 def cmd_pseudo_label(a):
@@ -274,6 +296,8 @@ def main(argv=None):
     s.add_argument("--out", default="data/synth")
     s.add_argument("--n", type=int, default=500)
     s.add_argument("--seed", type=int, default=0)
+    s.add_argument("--rare", action="store_true",
+                   help="E27: progressions with sus2/sus4/dim/aug/7ths (extended-vocabulary labels)")
     s.set_defaults(fn=cmd_synth)
 
     s = sp.add_parser("features", help="cache causal CQT features + frame labels")
@@ -282,6 +306,9 @@ def main(argv=None):
     s.add_argument("--device")
     s.add_argument("--gamma", type=float, default=FrontendConfig.gamma,
                    help="variable-Q offset (Hz): larger = shorter low-frequency windows, faster response")
+    s.add_argument("--extended", metavar="PREFIX",
+                   help="write extended-vocabulary labels (as data/cache_ext), files named PREFIX__<stem>; "
+                        "prefix synthx = training only")
     s.set_defaults(fn=cmd_features)
 
     s = sp.add_parser("bollywood", help="E21: Bollywood songs + UG sheets -> aligned labels")
@@ -340,6 +367,20 @@ def main(argv=None):
     s.add_argument("--bundle", help="optional model bundle for per-song agreement")
     s.set_defaults(fn=cmd_audit)
 
+    s = sp.add_parser("clean", help="E14: re-time drifting labels, drop songs that still drift (-> cache_bb_fix)")
+    s.add_argument("--cache", default="data/cache_bb")
+    s.add_argument("--audit", default="data/audit.csv")
+    s.add_argument("--out", default="data/cache_bb_fix")
+    s.add_argument("--max-drift", type=float, default=1.0)
+    s.set_defaults(fn=cmd_clean)
+
+    s = sp.add_parser("build-ext", help="E18: extended-vocabulary twin of the cleaned cache (-> cache_ext)")
+    s.add_argument("--labs", default="data/billboard")
+    s.add_argument("--cache-orig", default="data/cache_bb")
+    s.add_argument("--cache-clean", default="data/cache_bb_fix")
+    s.add_argument("--out", default="data/cache_ext")
+    s.set_defaults(fn=cmd_build_ext)
+
     s = sp.add_parser("pseudo-label", help="write teacher posteriors (soft targets) for distillation")
     s.add_argument("--teacher", required=True, help="bundle trained with --bidirectional")
     s.add_argument("--labelled", default="data/cache_bb_fix")
@@ -355,7 +396,7 @@ def main(argv=None):
 
     s = sp.add_parser("transcribe", help="run the live engine over a file (simulated stream)")
     s.add_argument("audio")
-    s.add_argument("--bundle", default="models/latest")
+    s.add_argument("--bundle", default="models/v7")
     s.add_argument("--out", help="write predicted .lab")
     s.add_argument("--ref", help="reference .lab for accuracy")
     s.add_argument("--raw", action="store_true", help="disable HMM smoothing")
@@ -363,7 +404,7 @@ def main(argv=None):
     s.set_defaults(fn=cmd_transcribe)
 
     s = sp.add_parser("serve", help="FastAPI WebSocket server + browser mic demo")
-    s.add_argument("--bundle", default="models/latest")
+    s.add_argument("--bundle", default="models/v7")
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8000)
     s.add_argument("--ssl-certfile", help="serve HTTPS (needed for mic access from other devices)")
@@ -372,13 +413,13 @@ def main(argv=None):
     s.set_defaults(fn=cmd_serve)
 
     s = sp.add_parser("mic", help="live recognition from a local input device")
-    s.add_argument("--bundle", default="models/latest")
+    s.add_argument("--bundle", default="models/v7")
     s.add_argument("--device", type=int)
     s.add_argument("--list-devices", action="store_true")
     s.set_defaults(fn=cmd_mic)
 
     s = sp.add_parser("listen", help="live recognition of audio the system is playing (Windows loopback)")
-    s.add_argument("--bundle", default="models/latest")
+    s.add_argument("--bundle", default="models/v7")
     s.add_argument("--speaker", help="output device name substring (default: system default)")
     s.add_argument("--list-devices", action="store_true")
     s.set_defaults(fn=cmd_listen)

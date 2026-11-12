@@ -150,3 +150,30 @@ def apply_map(arr: np.ndarray, m, fill) -> np.ndarray:
 def realign(feats: np.ndarray, labels: np.ndarray) -> np.ndarray:
     """Re-time labels with a smooth, piecewise-linear offset curve fitted to local alignments."""
     return apply_map(labels, realign_map(feats, labels), NO_CHORD)
+
+
+def clean_cache(cache: str | Path, audit_csv: str | Path, out: str | Path, max_drift_s: float = 1.0) -> dict:
+    """E14: re-time every song's labels (realign), keep the re-timing only if the re-audit scores at
+    least as well, and exclude songs whose drift still exceeds max_drift_s. Builds data/cache_bb_fix."""
+    import csv
+
+    rows = {r["id"]: r for r in csv.DictReader(open(audit_csv, encoding="utf-8"))}
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    stats = {"kept": 0, "retimed": 0, "excluded": 0}
+    for f in sorted(Path(cache).glob("*.npz")):
+        d = np.load(f)
+        feats, labels = d["feats"], d["labels"].astype(np.int64)
+        a0 = rows[f.stem.split("__")[-1]]
+        new = realign(feats.astype(np.float32), labels)
+        a1 = audit_song(feats.astype(np.float32), new)
+        use_new = a1["score"] >= float(a0["score"])
+        drift = a1["drift_s"] if use_new else float(a0["drift_s"])
+        if drift > max_drift_s:
+            stats["excluded"] += 1
+            continue
+        use = new if use_new else labels
+        stats["retimed"] += int(use_new and (new != labels).mean() > 0.01)
+        np.savez_compressed(out / f.name, feats=feats, labels=use.astype(np.int16))
+        stats["kept"] += 1
+    return stats

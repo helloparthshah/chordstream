@@ -4,7 +4,8 @@ Real-time chord recognition from live audio. Each 40 ms of audio produces one de
 only from audio already heard. The live model (v7) names the chord of the audio 120 ms ago: that
 short, trained-in delay lets each decision hear a little of what follows, which removes much of
 the flicker at chord changes. It names 108 chords (12 roots × maj, min, 7, maj7, m7, dim, aug,
-sus2, sus4) plus "no chord", and is trained on human-labelled data only.
+sus2, sus4) plus "no chord", and is trained on human-labelled data only. Chord names are spelled
+for the song's estimated key (G♯m in E major, D♭ in A♭ major).
 
 ## Architecture
 
@@ -29,8 +30,8 @@ flowchart LR
     end
     WL -- "WebSocket: PCM" --> ENG
     WL -- "same audio" --> ASR
-    ENG -- "chord per frame,<br/>chord per beat, BPM" --> UI
-    ENG -- "per-beat chords" --> SHEET
+    ENG -- "chord per frame (120 ms behind),<br/>key, BPM, beat pulse" --> UI
+    ENG -- "committed chords<br/>(held ≥ 480 ms, backdated)" --> SHEET
     ASR -- "word times" --> SHEET
     NP --> SHEET
     LY --> SHEET
@@ -51,8 +52,10 @@ flowchart LR
     HMM --> LIVE["Live chord<br/>(120 ms behind)"]
     HMM --> HOLD["Commit once held 480 ms,<br/>backdated to its start"]
     HOLD --> BEAT["Chord sheet + progression<br/>(blips never reach it)"]
+    HMM --> KEY["Key estimate<br/>(~30 s chord histogram)"]
+    KEY --> NAME["Spelled chord names<br/>G♯m vs A♭m"]
     CQT --> BT["Causal beat tracker<br/>onset flux, tempo, phase"]
-    BT --> BPM["BPM + beat pulse"]
+    BT --> BPM["BPM + beat pulse (display only)"]
 ```
 
 ### Model (ChordNet)
@@ -84,6 +87,10 @@ flowchart TB
     ALIGN -- "pass (394)" --> AUD["Audit + re-time labels<br/>exclude drifting songs (367 kept)"]
     AUD --> STU["Causal model<br/>human labels, 120 ms label delay<br/>+ transition weighting<br/>+ root/bass/notes heads"]
     PRE --> STU
+    RARE["Rare-chord renders<br/>sus2/sus4/dim/aug (E27)"] -. in progress .-> STU
+    YT["YouTube top Bollywood<br/>songs by year"] --> SHEETS["Ultimate Guitar chord sheets<br/>(matched + checked)"]
+    SHEETS --> JA["Jump alignment<br/>chroma templates, no neural model"]
+    JA -. "in progress (E21)" .-> STU
     STU --> EVAL["chordstream evaluate<br/>streaming-exact metrics"]
     EVAL --> EXP["ONNX export<br/>+ GitHub release"]
 ```
@@ -97,7 +104,10 @@ Every experiment behind these choices is in [docs/EXPERIMENTS.md](docs/EXPERIMEN
 | Frontend | Causal variable-Q CQT, 16 kHz, 640-sample hop (40 ms), 24 bins/oct from C2 (6 octaves). Kernels end at "now"; low bins integrate the past ~0.2 s. |
 | Causality | CNN pads time on the left only. Attention uses a causal band of 128 frames (~5 s) with ALiBi bias. Tests check that future input never changes past output. |
 | Streaming cost | ONNX runs one step per frame: the CNN sees its 13-frame receptive field, and each layer keeps a 127-entry KV cache. A test checks this matches the full forward pass exactly. |
-| Smoothing | HMM **forward filtering** only, never Viterbi backtracking, so smoothing adds no latency. Transitions = self-loop from median chord length plus a chord-change prior. |
+| Smoothing | HMM **forward filtering** only, never Viterbi backtracking, so smoothing adds no latency. Transitions = self-loop (mean chord 5 s) plus a chord-change prior; emissions sharpened with power 2. |
+| Look-ahead | **Label delay**: training targets are shifted 3 frames, so output t names the chord at t − 3 and every decision hears 120 ms past its frame. Worth +1.2–2.5 pts and fewer flips vs giving the same delay to the decoder (E23, E25). |
+| Chord sheet | The sheet only takes a chord once the live chord has held 480 ms, then backdates it to where it began: about the reference number of chord changes (1.03×) and 83.4% majmin (F03). The live readout still shows every decision. |
+| Spelling | A decaying (~30 s) histogram of the chords' notes picks the best-fitting key signature (with hysteresis); names use its sharps or flats. Display only. |
 | Vocabulary | 109 classes: 12 roots × 9 qualities + N; the first 25 are the classic major/minor set. Richer chords fold into the nearest quality (Cadd9→C, C9→C7, hdim7→dim). Power chords have no class but still train the root/bass/notes heads. |
 | UG "grammar" | Supplies (1) the HMM's chord-change matrix, counted in all 12 keys, and (2) progressions for the synthetic-audio renderer. |
 | Pitch augmentation | Shift CQT bins by ±semitones and transpose the labels, applied to every training crop. |
@@ -118,7 +128,7 @@ They were trained on copyrighted recordings, so keep them for personal use.
 ```powershell
 uv sync --extra train --extra mic            # CUDA torch on Windows/Linux
 
-# 1. Grammar from saved Ultimate Guitar pages (parser only, no scraper; check UG's ToS)
+# 1. Grammar from saved Ultimate Guitar pages
 uv run chordstream ug-parse path\to\saved_html --out data/ug.jsonl
 
 # 2. Synthetic pre-training audio rendered from those progressions
@@ -131,18 +141,45 @@ uv run chordstream fetch-billboard --rescore --max-drift 0.3                 # r
 #    or pair annotations with audio you own:
 uv run chordstream billboard-link --annotations billboard/McGill-Billboard --audio my_audio --out data/billboard
 
-# 4. Cache features, pre-train on synth, fine-tune on real audio
+# 4. Cache features and pre-train on synthetic audio (the init every model starts from)
 uv run chordstream features data/synth --out data/cache_synth
-uv run chordstream train --cache data/cache_synth --out models/pretrain --progressions data/ug.jsonl
-uv run chordstream features data/billboard --out data/cache_bb
-uv run chordstream train --cache data/cache_bb --init models/pretrain --out models/latest --lr 1e-4 --progressions data/ug.jsonl
+uv run chordstream train --cache data/cache_synth --out models/latest --progressions data/ug.jsonl
 
-# 5. Export + run
-uv run chordstream export models/latest
+# 5. Real-audio labels: cache, audit, re-time/clean (E14), extended-vocabulary twin (E18)
+uv run chordstream features data/billboard --out data/cache_bb
+uv run chordstream audit --cache data/cache_bb --out data/audit.csv
+uv run chordstream clean                        # -> data/cache_bb_fix (367 songs)
+uv run chordstream build-ext                    # -> data/cache_ext
+
+# 6. Train the live recipe (v7 = E25a), evaluate, export
+uv run chordstream train --init models/latest --cache data/cache_ext --vocab extended --label-delay 3 `
+    --lr 3e-4 --epochs 80 --crops 2000 --transition-weight 3 --out models/v7
+uv run chordstream evaluate models/v7 --cache data/cache_ext
+uv run chordstream export models/v7             # ONNX + parity check (HMM: see EXPERIMENTS E25)
+
+# 7. Run (default bundle: models/v7)
 uv run chordstream transcribe song.wav --ref song.lab --print   # simulated live stream + latency stats
 uv run chordstream mic                                           # local input device
 uv run chordstream serve                                         # http://localhost:8000 browser demo, ws://…/ws
 ```
+
+**Work in progress** (see [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) E21, E27):
+
+```powershell
+# E27: rare chord types from synthetic renders (training-only files, prefix synthx)
+uv run chordstream synth --rare --n 400 --out data/synth_rare
+uv run chordstream features data/synth_rare --extended synthx --out data/cache_rare
+
+# E21: Bollywood songs with human chord labels from Ultimate Guitar sheets
+uv run chordstream bollywood songs       # YouTube top-songs playlists, 2010-2024
+uv run chordstream bollywood sheets      # match UG "Chords" sheets (requests spaced 1.5 s)
+uv run chordstream bollywood validate    # drop look-alike / wrong-song matches
+uv run chordstream bollywood audio       # download matched songs (Firefox session)
+uv run chordstream bollywood cache       # CQT + sheet jump alignment -> data/cache_bolly
+```
+
+The Bollywood stage fetches UG search and tab pages at a slow rate for personal research; check
+Ultimate Guitar's terms before running it, and keep the sheets local.
 
 Billboard ships annotations only. `fetch-billboard` searches YouTube and picks the result
 whose length matches the annotation, preferring "- Topic" label uploads and skipping
@@ -182,8 +219,9 @@ docker run -p 8000:8000 chordstream
   which gives the title, artist and playback position from Spotify, YouTube Music, browsers
   and so on. It then fetches time-synced lyrics from [LRCLIB](https://lrclib.net)
   (`/api/lyrics`), cached in `data/lyrics_cache/`.
-- **Placement:** each chord that holds for ≥ 320 ms is placed above the word being sung at
-  that moment, Ultimate Guitar-style. Placement within a line is by timing, so it's
+- **Placement:** the engine commits a chord to the sheet once it has held 480 ms, backdated to
+  where it began, and the page places it above the word being sung at that moment, Ultimate
+  Guitar-style. Short blips show on the live readout but never reach the sheet. Placement within a line is by timing, so it's
   approximate. Chords outside lyric lines go into Intro or Instrumental rows.
 - **Sync controls:** **±** shifts the lyrics against the music, and clicking a lyric line
   as it is sung re-syncs everything. If the player doesn't report a position, clicking a
@@ -209,10 +247,19 @@ and a GPU recommended.
 ## Results
 
 The live model is **v7**, with an extended vocabulary (maj, min, 7, maj7, m7, dim, aug, sus2,
-sus4) and a 120 ms label delay, trained on human labels only. Majmin accuracy is 83.3% on 36 clean
-held-out Billboard songs and 83.1% on the original 10 (from 73.8% for the first fine-tuned model);
-full-vocabulary accuracy is 73.0%, and it makes 1.48× the reference number of chord changes (v6,
-with zero delay: 80.8%, 70.3%, 1.61×). It uses about 2.4 ms of CPU per 40 ms frame. Every experiment, including the ones that didn't help, is in
+sus4) and a 120 ms label delay, trained on human labels only.
+
+| | v7 (live) | v6 (previous, zero delay, distilled) |
+|---|---|---|
+| Majmin, 36 clean held-out Billboard songs | **83.3%** | 80.8% |
+| Majmin, original 10 | **83.1%** | 79.9% |
+| Full vocabulary (109 classes) | **73.0%** | 70.3% |
+| Live chord changes vs reference | **1.48×** | 1.61× |
+| Chord sheet (480 ms hold) | 83.4% majmin, **1.03×** changes | – |
+
+The first fine-tuned model scored 73.8% on the original 10. A step costs about 2.4 ms of CPU per
+40 ms frame. Bollywood (E21) and rare chord types (E27) are in progress. Every experiment,
+including the ones that didn't help, is in
 **[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)**, with commands and decisions. The batch scripts
 are in [`experiments/`](experiments/).
 
@@ -237,10 +284,20 @@ relay on a port that's already open.
 
 Send binary messages of little-endian float32 mono PCM at 16 kHz, in any chunk size.
 Each completed 40 ms frame returns one JSON event:
-`{"type":"chord","time":12.36,"label":"A:min","name":"Am","confidence":0.94,"raw_index":22,"changed":false,...}`.
+`{"type":"chord","time":12.36,"label":"A:min","name":"Am","confidence":0.94,"raw_index":22,"changed":false,"delay":0.12,"key":"C / Am",...}`.
+
+| Field | Meaning |
+|---|---|
+| `time` | stream time at the end of the newest frame (s) |
+| `label`, `name`, `index` | chord of the audio at `time − delay` (Harte label, key-spelled display name, class) |
+| `delay` | the model's label delay in seconds (0.12 for v7) |
+| `key` | estimated key signature, e.g. `"E / C#m"`, once known |
+| `beat`, `bpm`, `beat_conf` | causal beat tracker (display only) |
+| `beat_label`, `beat_name`, `beat_t0` | set when a chord is committed to the sheet: the chord and its start time (described time) |
 Send the text `reset` between songs. Set `CHORDSTREAM_ONLY_CHANGES=1` to receive only chord changes.
 
 ## Tests
 
-`uv run pytest`: chord parsing, UG extraction, CQT pitch alignment, streaming/offline CQT
-parity, CNN/Transformer causality, KV-cache step ≡ full forward, HMM anti-flicker.
+`uv run pytest`: chord parsing (Harte, free text, extended), UG extraction, CQT pitch alignment,
+streaming/offline CQT parity, CNN/Transformer causality, KV-cache step ≡ full forward (also for the
+optional sheet head), label-delay targets and realignment, HMM anti-flicker, key-aware spelling.

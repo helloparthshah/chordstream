@@ -55,10 +55,15 @@ Comparisons inside one experiment always use the same set. Differences under ~0.
 | **v7** (extended, 120 ms label delay, human labels) | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v7)) | **83.1%** majmin | **83.3% majmin, 73.0% full (36 clean)** | 1.48× | 120 ms display | E25 |
 
 Biggest wins: real data (E03, +28 pts over synthetic only), training budget (E13/E15, +2.4),
-more data (E08, +2), distillation (E17, +0.7), transition loss (E09, lag 120 → 40–80 ms).
+a trained-in 120 ms label delay (E23/E25, +2.5 majmin and fewer flips), more data (E08, +2),
+transition loss (E09, lag 120 → 40–80 ms), and a 480 ms hold for the chord sheet (F03, changes
+1.6× → 1.03×). Distillation gave +0.7 (E17) but is no longer used (policy above; E24 showed no
+gain on the extended model).
 Things that did **not** help: beat or key priors in the HMM, a faster frontend, a bigger model
-at the old learning rate, re-timing labels (for training), and data beyond ~200 songs at the
-old training budget.
+at the old learning rate, re-timing labels (for training), data beyond ~200 songs at the old
+training budget, drum suppression (E19), a stability loss (E22), draft/verify "speculative"
+display (F02), a second longer-delay head (E26), and per-beat averaging once the model has
+look-ahead (F03).
 
 ---
 
@@ -391,18 +396,53 @@ Dates are the day the experiment ran.
   per-beat chords, and has essentially the reference number of chord changes. Streaming check on 4
   held-out songs: 0.99× the reference changes.
 
+### E21 · Bollywood songs with human chord labels from UG sheets · 2026-11-12 — in progress
+- **Question:** all labelled songs are US Billboard hits (1958–1991). How well does v7 do on
+  Bollywood, and does fine-tuning on Bollywood songs with human (chord-sheet) labels help?
+- **Earlier probe:** *Raat Bhar* (Heropanti), v6 vs its UG sheet (E, B, C♯m, A, D): key matches;
+  93% of time on the sheet's chords (extra: G♯m 6%); 88% of the sheet's 75 changes found in order;
+  over-segmented (136 vs 75 changes, mostly A↔C♯m and C♯m↔B).
+- **Pipeline** (`chordstream bollywood <stage>`, `data/bollywood.py`): YouTube playlists of each
+  year's top Bollywood songs (2010–2024; 266 songs) → UG "Chords" sheet per song (search, title
+  overlap, rating × votes; then a plausibility check: every word of UG's song name must be in the
+  video title and the sheet filed as a soundtrack or under an artist named in the title, which
+  catches look-alikes such as "You Are My Soniya" → "You Are My Sunshine") → audio → labels.
+- **Labels without a neural model** (`data/sheet_align.py`): sheets give chords in order but no
+  times. Chroma-template forced alignment of the sheet's chord sequence, allowing jumps to line
+  starts (McVicar et al.'s jump alignment; sheets omit repeats), all 12 transpositions tried
+  (capo / key). Chord identities are human; timing is signal processing.
+- **Aligner validation** (`experiments/analysis_sheet_align.py`; 36 held-out Billboard songs, the
+  "sheet" = each song's annotated chord sequence given in a random key):
+
+  | method | full vocab | majmin | key recovered |
+  |---|---|---|---|
+  | sheet chords + bigram grammar, unordered | 58.8% | 65.5% | 31/36 |
+  | **ordered forced alignment** | **77.6%** | **79.6%** | **36/36** |
+
+  Emission sharpness and chord duration barely matter (76.5–77.0% on a 12-song grid); the chroma
+  templates are the limit. Real sheets are less complete than this simulation.
+- **Plan:** the Bollywood test set is scored mainly with timing-free sheet metrics (key, share of
+  time on the sheet's chords, in-order coverage of the sheet's changes), aligned-frame accuracy as
+  a secondary measure; fine-tune v7's recipe on Billboard + aligned Bollywood songs (low-margin
+  alignments excluded) and compare on the Bollywood test set and the 36 Billboard songs.
+- **Status:** songs collected; sheet matching running.
+
+### D01 · Key-aware chord spelling (display) · 2026-11-12
+- Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`
+  keeps a ~30 s decaying histogram of the chords' notes, picks the best-fitting major-scale key
+  signature after 8 s (switching only when another fits 10% better) and spells roots with its
+  sharps or flats. Events carry `key`; the UI shows it next to the BPM. Recognition unchanged.
+
 ---
 
 ## Queue
 
 | ID | Experiment | Question | Notes |
 |---|---|---|---|
-| E21 | Bollywood domain adaptation | All 394 labelled songs are US Billboard hits (1958–1991); no Bollywood | Human labels only (no-distillation policy): UG chord sheets anchored to timed lyrics (LRCLIB + Whisper) as approximately timed labels for sung sections, for both training and a timed test set; untimed sheet comparison as a fallback. First probe: *Raat Bhar* (Heropanti) with v6 vs its UG sheet (E, B, C♯m, A, D): key **matches** (E major); 93% of time on the sheet's chords (extra: G♯m 6%); 88% of the sheet's 75 changes found in order; over-segmented 136 vs 75 changes, mostly A↔C♯m and C♯m↔B wavering. Use this scoring (key, time-in-sheet, sequence coverage) for the Bollywood test set. **Timed labels idea:** UG sheets put chords over words and LRCLIB + Whisper time the words, so sheet + lyrics give approximately timed human chord labels for sung sections; use them as a timed test set and to check/correct teacher pseudo-labels. Note: training-label sync is checked against audio (fetch-time alignment, E14 audit), never lyrics; pseudo-labels are aligned by construction |
-| later | Seed repeats for v4 vs v5 | Is the distillation gain robust to training randomness? | Retrain both with a second seed (~40 min) |
-| later | Key-aware chord spelling | Names use one fixed spelling (A♭m instead of G♯m in E major) | Display only |
-| later | Learned beat head | Better beats for E16 (up to +2.7 pts on the sheet) | Multi-task beat output trained on Billboard bar timings |
-| later | Rare chord types (sus, dim, aug) | E18: under 0.5% of frames each, ≈0% recall | Synthetic renders of these qualities mixed into training, or more annotated data |
-| later | More unlabelled audio for distillation | E17 used 299 extra songs; the literature uses 1000+ hours | User library or more fetches |
+| E21 | Bollywood (above) | v7 on Bollywood; fine-tune with sheet-aligned labels | In progress |
+| E27 | Rare chord types from synthetic renders | E18: sus2/dim/aug < 0.5% of frames, ≈0% recall; sus4 11% | `synth --rare` (sus2/sus4 resolving, passing dim, aug links, 7ths) → `data/cache_rare` (train-only prefix `synthx`), mixed with `data/cache_ext`; v7 recipe; compare per-type recall and majmin vs v7 |
+| later | More Bollywood / Indian labelled data | Depends on E21 | More years, regional playlists |
+
 
 ## Model directory registry
 
