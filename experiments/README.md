@@ -13,6 +13,7 @@ They assume the synthetic init `models/latest` and the caches built by the CLI:
 | `data/cache_bb_fix` | `chordstream audit` + `chordstream clean` | re-timed labels, drifting songs removed (E14) |
 | `data/cache_ext` | `chordstream build-ext` | same songs, 109-class labels + root/bass/notes (E18) |
 | `data/cache_rare` | `chordstream synth --rare` + `features --extended synthx` | rare-chord renders, training only (E27) |
+| `data/cache_ext_rare`, `data/cache_ext_rare50` | experiment scripts (hard links) | `cache_ext` + 150 / 50 rare renders (E27, E27b) |
 | `data/cache_bolly` | `chordstream bollywood cache` | Bollywood songs, sheet-aligned labels (E21) |
 
 **Analyses** (`analysis_*.py`, `uv run --no-sync python experiments/<script> ...`; usage in each docstring):
@@ -24,3 +25,5 @@ They assume the synthetic init `models/latest` and the caches built by the CLI:
 | `analysis_speculative.py` | F02 | draft + verifier display rules |
 | `analysis_beat_sheet.py` | F03 | chord-sheet sources: beat pooling, beat vote, HMM path |
 | `analysis_sheet_align.py`, `analysis_sheet_align_grid.py` | E21 | accuracy of sheet-to-audio alignment on Billboard |
+| `analysis_bollywood.py` | E21 | Bollywood test songs: time in sheet, sequence coverage, changes, aligned accuracy |
+| `analysis_per_type.py` | E18, E27 | per-chord-type recall with a common HMM |

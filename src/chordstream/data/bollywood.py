@@ -233,12 +233,18 @@ def plausible_match(song: dict, sheet: dict) -> bool:
 
 def stage_validate() -> dict:
     out = ROOT / "sheets"
-    stats = {"kept": 0, "rejected": 0}
+    stats = {"kept": 0, "rejected": 0, "duplicate": 0}
+    seen: set[str] = set()
     for s in songs():
         f = out / f"{s['id']}.json"
         if not f.exists():
             continue
-        if plausible_match(s, json.loads(f.read_text(encoding="utf-8"))):
+        sheet = json.loads(f.read_text(encoding="utf-8"))
+        if sheet["url"] in seen:  # same song from another playlist: one copy only (no train/test leak)
+            f.rename(out / f"{s['id']}.duplicate")
+            stats["duplicate"] += 1
+        elif plausible_match(s, sheet):
+            seen.add(sheet["url"])
             stats["kept"] += 1
         else:
             f.rename(out / f"{s['id']}.rejected")

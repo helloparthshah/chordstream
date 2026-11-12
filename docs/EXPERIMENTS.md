@@ -427,6 +427,28 @@ Dates are the day the experiment ran.
   alignments excluded) and compare on the Bollywood test set and the 36 Billboard songs.
 - **Status:** songs collected; sheet matching running.
 
+### E27 · Rare chord types from synthetic renders · 2026-11-12 — `models/e27_rare`
+- **Script:** [`experiments/2026-11-12_rare_chords.ps1`](../experiments/2026-11-12_rare_chords.ps1)
+- **Setup:** `chordstream synth --rare`: diatonic loops with sus2/sus4 that resolve, passing
+  diminished chords a semitone below the next chord, augmented links and 7ths, exact labels
+  (400 rendered, `data/cache_rare`, training-only prefix `synthx`). 150 of them mixed into
+  `data/cache_ext` (~30% of songs); v7's recipe otherwise.
+- **Result (36 clean held-out, HMM 5 s / power 2 for both; `experiments/analysis_per_type.py`):**
+
+  | | v7 | E27 |
+  |---|---|---|
+  | majmin / full | **83.3% / 73.0%** | 82.8% / 72.3% |
+  | changes | **1.60×** | 1.66× |
+  | dim recall (0.3% of frames) | 4% | **52%** |
+  | aug recall (0.3%) | 0% | **24%** |
+  | sus4 recall (2.9%) | 15% | **19%** |
+  | sus2 (< 0.1%) | 0% | 0% |
+  | 7 / maj7 / m7 recall | **44 / 48 / 55%** | 40 / 43 / 51% |
+
+- **Decision:** not deployed. The rare types are learnable from synthetic audio, but at 30% of
+  songs the synthetic share costs 0.5–0.7 pt overall (7th chords most). E27b tries a lighter
+  mix (50 renders, ~12%).
+
 ### D01 · Key-aware chord spelling (display) · 2026-11-12
 - Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`
   keeps a ~30 s decaying histogram of the chords' notes, picks the best-fitting major-scale key
@@ -440,7 +462,7 @@ Dates are the day the experiment ran.
 | ID | Experiment | Question | Notes |
 |---|---|---|---|
 | E21 | Bollywood (above) | v7 on Bollywood; fine-tune with sheet-aligned labels | In progress |
-| E27 | Rare chord types from synthetic renders | E18: sus2/dim/aug < 0.5% of frames, ≈0% recall; sus4 11% | `synth --rare` (sus2/sus4 resolving, passing dim, aug links, 7ths) → `data/cache_rare` (train-only prefix `synthx`), mixed with `data/cache_ext`; v7 recipe; compare per-type recall and majmin vs v7 |
+| E27b | Lighter rare-chord mix (50 renders, ~12% of songs; `experiments/2026-11-12_rare_chords_light.ps1`) | Keep most of E27's rare-chord recall without the overall cost? | Running |
 | later | More Bollywood / Indian labelled data | Depends on E21 | More years, regional playlists |
 
 
@@ -455,6 +477,7 @@ Dates are the day the experiment ran.
 | `v7` | E25 | **live**, release `model-v7` (= `e25a_ext_delay3` + HMM 5 s / power 2) |
 | `e25a_ext_delay3`, `e25b_ext_delay6` | E25 | extended label-delay models |
 | `e26a_sheet8`, `e26b_sheet12` | E26 | rejected; safe to delete |
+| `e27_rare` | E27 | rare-chord mix (150 renders); not deployed |
 | `teacher` | E17 | offline teacher for majmin distillation |
 | `exp_a`, `exp_b`, `exp_w2/3/5`, `exp_g10`, `synth_g10`, `exp_lr3`, `exp_big`, `synth_big`, `v4_clean`, `v4_orig`, `student` | E08–E17 | experiment outputs; safe to delete |
 | `ext_teacher` | E18 | offline teacher for extended-vocabulary distillation |
