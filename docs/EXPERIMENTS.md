@@ -443,7 +443,22 @@ Dates are the day the experiment ran.
   partly a domain gap.
 - **Training** ([`2026-11-12_bollywood.ps1`](../experiments/2026-11-12_bollywood.ps1)): `data/cache_ext`
   + the 41 training songs linked 3× (prefix `bollytrain__`, never held out); E21a = v7's recipe from
-  the synthetic init, E21b = v7 fine-tuned 20 epochs at lr 1e-4. Running.
+  the synthetic init, E21b = v7 fine-tuned 20 epochs at lr 1e-4.
+- **Result:**
+
+  | model | Bollywood: in sheet | coverage | changes | aligned majmin / full | Billboard 36: majmin / full | original 10 |
+  |---|---|---|---|---|---|---|
+  | v7 | 88.2% | 71.7% | 0.96× | 55.8% / 50.0% | **83.3% / 73.0%** | **83.1%** |
+  | E21a (scratch) | 92.5% | 74.3% | 1.35× | **67.4% / 65.1%** | 81.6% / 70.7% | 80.0% |
+  | E21b (fine-tune) | **92.7%** | **74.4%** | 1.30× | 65.2% / 62.9% | 81.1% / 70.8% | 80.3% |
+
+  Bollywood improves on the timing-free sheet metrics too (in sheet +4.3, coverage +2.6), so this
+  is not just learning the aligner's habits; but Billboard drops 1.7–2.2 pt and Bollywood output
+  changes chord more often. Likely cause: the aligned labels' errors (~20%, concentrated at chord
+  boundaries) at 25% of the training weight.
+- **E21c / E21d** ([`2026-11-12_bollywood_masked.ps1`](../experiments/2026-11-12_bollywood_masked.ps1)):
+  Bollywood labels ignored within ±320 ms of every aligned chord change
+  (`bollywood.mask_boundaries`), 3× / 1× weight. Running.
 
 ### E27 · Rare chord types from synthetic renders · 2026-11-12 — `models/e27_rare`
 - **Script:** [`experiments/2026-11-12_rare_chords.ps1`](../experiments/2026-11-12_rare_chords.ps1)
@@ -501,6 +516,7 @@ Dates are the day the experiment ran.
 | `e26a_sheet8`, `e26b_sheet12` | E26 | rejected; safe to delete |
 | `e27_rare` | E27 | rare-chord mix (150 renders); not deployed |
 | `e27b_rare50` | E27b | rare-chord mix (50 renders); candidate |
+| `e21a_bolly`, `e21b_bolly_ft` | E21 | Bollywood mix (scratch / fine-tune); Billboard regression, not deployed |
 | `teacher` | E17 | offline teacher for majmin distillation |
 | `exp_a`, `exp_b`, `exp_w2/3/5`, `exp_g10`, `synth_g10`, `exp_lr3`, `exp_big`, `synth_big`, `v4_clean`, `v4_orig`, `student` | E08–E17 | experiment outputs; safe to delete |
 | `ext_teacher` | E18 | offline teacher for extended-vocabulary distillation |

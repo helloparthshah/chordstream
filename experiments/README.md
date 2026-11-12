@@ -16,6 +16,7 @@ They assume the synthetic init `models/latest` and the caches built by the CLI:
 | `data/cache_ext_rare`, `data/cache_ext_rare50` | experiment scripts (hard links) | `cache_ext` + 150 / 50 rare renders (E27, E27b) |
 | `data/cache_bolly` | `chordstream bollywood cache` | Bollywood songs, sheet-aligned labels (E21) |
 | `data/cache_ext_bolly` | `2026-11-12_bollywood.ps1` (hard links) | `cache_ext` + trusted Bollywood training songs ×3 (E21) |
+| `data/cache_bolly_masked`, `data/cache_ext_bollym3/1` | `bollywood.mask_boundaries`, `2026-11-12_bollywood_masked.ps1` | Bollywood labels ignored ±320 ms around aligned changes; mixes at 3× / 1× (E21c/d) |
 
 **Analyses** (`analysis_*.py`, `uv run --no-sync python experiments/<script> ...`; usage in each docstring):
 

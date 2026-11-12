@@ -329,3 +329,26 @@ def trusted_ids() -> set[str]:
     which chroma confuses."""
     rows = [json.loads(l) for l in (ROOT / "align.jsonl").read_text(encoding="utf-8").splitlines()]
     return {r["id"] for r in rows if r["shift"] == (r["capo"] or 0) % 12}
+
+
+def mask_boundaries(src: str | Path = "data/cache_bolly", out: str | Path = "data/cache_bolly_masked",
+                    frames: int = 8) -> int:
+    """Copy of the cache with labels ignored within +-frames of every aligned chord change: the
+    chord identities (human) still train, the uncertain timing (aligner) does not. E21c/d."""
+    from ..vocab import IGNORE
+
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for f in sorted(Path(src).glob("*.npz")):
+        d = dict(np.load(f))
+        y = d["labels"].astype(np.int64)
+        near = np.zeros(len(y), bool)
+        for c in np.flatnonzero(np.diff(y) != 0) + 1:
+            near[max(0, c - frames): c + frames] = True
+        for k in ("labels", "root", "bass", "labels_mm"):
+            d[k] = np.where(near, IGNORE, d[k]).astype(d[k].dtype)
+        d["notes"] = np.where(near, -1, d["notes"]).astype(d["notes"].dtype)
+        np.savez_compressed(out / f.name, **d)
+        n += 1
+    return n
