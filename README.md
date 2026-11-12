@@ -253,7 +253,7 @@ and a GPU recommended.
 
 ## Gold labels for the Bollywood test songs
 
-`https://<host>:8000/annotate` opens a correction page for the Bollywood test songs (E21). It
+`https://<host>:8000/annotate` opens a correction page for the 61 Bollywood test songs (E21/E28). It
 loads a song's audio and its sheet-aligned chords on a zoomable timeline; you play it (optionally
 slower, looping one segment), click a segment and press **1–9** for the sheet's chords (**0** =
 no chord, **X** = unsure, excluded from scoring), drag boundaries, **S**plit at the playhead or
@@ -271,12 +271,14 @@ accuracy over **both** test sets.
 |---|---|---|---|
 | Bollywood, 23 test songs, majmin / full | **80.0% / 78.0%** | 68.9% / 61.3% | – |
 | Bollywood, share of time on the sheet's chords | **92.8%** | 89.5% | – |
+| Bollywood, 61 test songs (v3), majmin | **78.0%** | 60.7% | – |
 | Billboard, 36 clean held-out songs, majmin / full | 81.8% / 70.5% | **83.3% / 73.0%** | 80.8% / 70.3% |
 | **Overall** (mean of the two test sets, majmin) | **80.9%** | 76.1% | – |
 | Chord sheet (480 ms hold, v7) | – | 83.4% majmin, 1.03× changes | – |
 
 Bollywood accuracy is measured against sheet-aligned labels (about 82–84% accurate when checked on
-Billboard); hand-corrected gold labels from the annotate page replace them song by song. The
+Billboard); hand-corrected gold labels from the annotate page replace them song by song. Scaling to 152
+Bollywood training songs (E28) did not beat v8. The
 first fine-tuned model scored 73.8% on Billboard's original 10. A step costs about 2.4 ms of CPU per
 40 ms frame. Every experiment, including the ones that didn't help, is in
 **[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)**, with commands and decisions. The batch scripts

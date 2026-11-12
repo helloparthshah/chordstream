@@ -20,7 +20,7 @@ from .vocab import CLASS_NAMES, IGNORE, NO_CHORD, pretty_name, transpose
 
 router = APIRouter(prefix="/api/gold")
 ROOT = Path("data/bollywood")
-CACHE = Path("data/cache_bolly2")
+CACHE = Path("data/cache_bolly3")  # E21 scale-up (superset of cache_bolly2, same split)
 GOLD = ROOT / "gold"
 FS = 0.04
 
@@ -34,7 +34,7 @@ def _songs() -> dict[str, dict]:
 
 
 def _diag() -> dict[str, dict]:
-    p = ROOT / "align2.jsonl"
+    p = ROOT / "align_cache_bolly3.jsonl"
     return {json.loads(l)["id"]: json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()}
 
 

@@ -545,6 +545,42 @@ Dates are the day the experiment ran.
 - **Decision (E27b):** keeps most of the diminished-chord gain at no measurable cost; deployment
   decided together with E21.
 
+### E28 · Scaled Bollywood set (152 training songs) · 2026-11-12 — `models/e28a_bolly3x1`, `models/e28b_bolly3x2`
+
+- **Data:** the E21 scale-up ([`2026-11-12_bollywood_scale.ps1`](../experiments/2026-11-12_bollywood_scale.ps1))
+  covered 2000–2024 (3 playlists × 40 songs per year, 1,426 songs). After sheet matching, validation,
+  audio, and E21 cleaning, `data/cache_bolly3` has **213 kept songs** (from 70), with 152 for training
+  and 61 for testing. The hash split is the same as before, so the 61 test songs include v2's 23 and no
+  test song is ever trained on.
+- **Benchmark v3:** `analysis_bollywood.py --v3` scores the 61 test songs. From now on it is the
+  Bollywood half of the selection rule, and v2 is kept for continuity. The `/annotate` page now lists
+  these 61 songs.
+- **Runs** ([`2026-11-12_bollywood_scaled_train.ps1`](../experiments/2026-11-12_bollywood_scaled_train.ps1)):
+  - Recipe: v8's, from the synthetic init. Each model is evaluated with HMM 5 s / power 2
+    (`experiments/hmm55.py` writes `<model>_h5p2`).
+  - E28a sees each Bollywood song once, which keeps Bollywood's share about the same as E21e's 47 × 3.
+  - E28b sees each song twice.
+
+  | model | Billboard majmin / full | Bollywood v3 majmin / full | in sheet | coverage | changes | v2 majmin | **mean (v3)** | pooled (97 songs) |
+  |---|---|---|---|---|---|---|---|---|
+  | v7 | **83.3% / 73.0%** | 60.7% / 54.0% | 78.1% | 68.7% | 0.96× | 68.9% | 72.0% | 69.1% |
+  | v8 (E21e, 47 songs ×3) | 81.8% / 70.5% | 78.0% / 75.2% | **90.4%** | **78.6%** | 1.16× | 80.0% | 79.9% | 79.4% |
+  | E28a (152 ×1) | 81.5% / 70.2% | 78.2% / 75.7% | 90.3% | 78.3% | 1.13× | 80.0% | 79.9% | 79.4% |
+  | E28b (152 ×2) | 80.2% / 67.7% | **80.0% / 77.4%** | 89.8% | 78.4% | 1.25× | **81.6%** | **80.1%** | **80.1%** |
+
+- **Findings:**
+  - v8 generalizes to the 38 Bollywood test songs it had never been scored on: 78.0% there, against
+    v7's 60.7%.
+  - Tripling the Bollywood songs buys almost nothing. E28a ties v8. E28b gains +0.2 pt on the mean,
+    but only on the aligned-label score, which may be flattered by training on labels made the same
+    way.
+  - E28b does worse on the measures that don't depend on the aligner's timing: in sheet −0.6 pt,
+    coverage −0.2 pt, 1.25× changes (more flicker). It is also −1.6 pt on Billboard.
+  - The limit now looks like the quality of the sheet-aligned labels, not the number of songs.
+- **Decision:** keep **v8**. E28b's gain is within noise and fails the selection rule's check that the
+  aligner-independent metrics must not fall. Hand-corrected gold labels would show whether the extra
+  data helps on exact labels.
+
 ### D01 · Key-aware chord spelling (display) · 2026-11-12
 - Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`
   keeps a ~30 s decaying histogram of the chords' notes, picks the best-fitting major-scale key
@@ -557,10 +593,9 @@ Dates are the day the experiment ran.
 
 | ID | Experiment | Question | Notes |
 |---|---|---|---|
-| E21 | Bollywood (above) | Does training on sheet-aligned Bollywood songs help on Bollywood without hurting Billboard? | Training running |
 | later | More Bollywood / Indian labelled data | Depends on E21 | **Survey (2026-11-12): no public time-aligned Bollywood chord dataset exists.** ChoCo's 18 sources are Western/Japanese pop, jazz, classical; Saraga (CompMusic) is Indian art music without chords; Chordonomicon (667k songs) is untimed UG scrapes without titles/artists (CC-BY-NC); Hooktheory/TheoryTab is time-aligned and human but has only a handful of Indian songs (e.g. *Kal Ho Naa Ho*, *Jai Ho*), gated, non-commercial. Best levers: scale the E21 pipeline (more years/playlists; ~37% of songs currently find a usable sheet), other human sheet sites (e.g. Acousterr; check terms), and a small hand-corrected gold test set |
-| E21 scale-up | More Bollywood songs ([`2026-11-12_bollywood_scale.ps1`](../experiments/2026-11-12_bollywood_scale.ps1)) | Does more sheet-aligned data help further? | 2000–2024, 3 playlists × 40 songs per year, full pipeline → `data/cache_bolly3`. Running. Other sheet sites: Acousterr's terms forbid automated access (§5), so not used; UG's terms allow personal, non-commercial access (§6.3), which this is (sheets stay local) |
-| E21 gold | Hand-corrected test labels (`/annotate` page, `chordstream.gold`) | How accurate are models on Bollywood with exact labels? | Built 2026-11-12; the benchmark uses a song's gold labels once marked done. Needs a person to annotate (~10–15 songs) |
+| E21 scale-up | More Bollywood songs ([`2026-11-12_bollywood_scale.ps1`](../experiments/2026-11-12_bollywood_scale.ps1)) | Does more sheet-aligned data help further? | 2000–2024, 3 playlists × 40 songs per year, full pipeline → `data/cache_bolly3`. **Done, see E28: 213 songs, no gain over v8.** Other sheet sites: Acousterr's terms forbid automated access (§5), so not used; UG's terms allow personal, non-commercial access (§6.3), which this is (sheets stay local) |
+| E21 gold | Hand-corrected test labels (`/annotate` page, `chordstream.gold`) | How accurate are models on Bollywood with exact labels? | Built 2026-11-12; the benchmark uses a song's gold labels once marked done. Needs a person to annotate (~10–15 songs). Now lists the 61 v3 test songs. The next useful step for Bollywood, since more aligned data stopped helping (E28) |
 
 
 ## Model directory registry
@@ -580,6 +615,7 @@ Dates are the day the experiment ran.
 | `e21a_live` | E21 | `e21a_bolly` + HMM 5 s / power 2, exported; was on trial in the UI; safe to delete |
 | `v8` | E21e | **live**, release `model-v8` (= `e21e_bolly_clean` + HMM 5 s / power 2) |
 | `e21c_bolly_mask3`, `e21d_bolly_mask1`, `e21e_bolly_clean`, `e21f_bolly_clean_rare` | E21 | Bollywood variants (e21e = v8) |
+| `e28a_bolly3x1`, `e28b_bolly3x2` (+ `_h5p2` eval copies) | E28 | scaled Bollywood mixes; not deployed |
 | `teacher` | E17 | offline teacher for majmin distillation |
 | `exp_a`, `exp_b`, `exp_w2/3/5`, `exp_g10`, `synth_g10`, `exp_lr3`, `exp_big`, `synth_big`, `v4_clean`, `v4_orig`, `student` | E08–E17 | experiment outputs; safe to delete |
 | `ext_teacher` | E18 | offline teacher for extended-vocabulary distillation |

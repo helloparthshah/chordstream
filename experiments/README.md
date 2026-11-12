@@ -17,6 +17,8 @@ They assume the synthetic init `models/latest` and the caches built by the CLI:
 | `data/cache_bolly` | `chordstream bollywood cache` | Bollywood songs, sheet-aligned labels (E21) |
 | `data/cache_bolly2` | `chordstream bollywood clean` | cleaned labels: bass-aware, capo key, least-confident 30% ignored (E21) |
 | `data/cache_ext_bolly2`, `data/cache_ext_bolly2_rare` | `2026-11-12_bollywood_clean.ps1` | `cache_ext` + cleaned Bollywood ×3 (+ 50 rare renders) (E21e/f) |
+| `data/cache_bolly3` | `2026-11-12_bollywood_scale.ps1` | E21 scale-up: 213 cleaned songs (61 test) (E28; v3 benchmark) |
+| `data/cache_ext_bolly3x1`, `data/cache_ext_bolly3x2` | `2026-11-12_bollywood_scaled_train.ps1` | `cache_ext` + 152 Bollywood training songs ×1 / ×2 (E28) |
 | `data/cache_ext_bolly` | `2026-11-12_bollywood.ps1` (hard links) | `cache_ext` + trusted Bollywood training songs ×3 (E21) |
 | `data/cache_bolly_masked`, `data/cache_ext_bollym3/1` | `bollywood.mask_boundaries`, `2026-11-12_bollywood_masked.ps1` | Bollywood labels ignored ±320 ms around aligned changes; mixes at 3× / 1× (E21c/d) |
 
@@ -29,6 +31,7 @@ They assume the synthetic init `models/latest` and the caches built by the CLI:
 | `analysis_speculative.py` | F02 | draft + verifier display rules |
 | `analysis_beat_sheet.py` | F03 | chord-sheet sources: beat pooling, beat vote, HMM path |
 | `analysis_sheet_align.py`, `analysis_sheet_align_grid.py` | E21 | accuracy of sheet-to-audio alignment on Billboard |
-| `analysis_bollywood.py` | E21 | Bollywood test songs: time in sheet, sequence coverage, changes, aligned accuracy |
+| `analysis_bollywood.py` | E21 | Bollywood test songs: time in sheet, sequence coverage, changes, aligned accuracy (`--v3`: the 61 scaled test songs) |
+| `hmm55.py` | E28 | copy a model to `<dir>_h5p2` with the deployed HMM (5 s / power 2) for evaluation |
 | `analysis_per_type.py` | E18, E27 | per-chord-type recall with a common HMM |
 | `analysis_label_cleaning.py` | E21 | aligner variants on Billboard: bass evidence, beat snapping, confidence mask |

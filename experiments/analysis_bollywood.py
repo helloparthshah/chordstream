@@ -11,8 +11,10 @@ Predictions are the live HMM path (what the readout shows), at the frames they d
 Benchmarks: "v1" = data/cache_bolly, songs whose aligned transposition matched the capo
 (bollywood.trusted_ids); "v2" (default from E21 cleaning on) = data/cache_bolly2: bass-aware
 alignment at the capo transposition, least-confident 30% of frames ignored (bollywood.trusted_ids_v2).
+"v3" (--v3, from the E21 scale-up on) = data/cache_bolly3: the same cleaning on 213 kept songs, 61 test
+songs (a superset of v2's 23: the hash split is the same).
 
-usage: python experiments/analysis_bollywood.py [--v1] models/v7 [models/x ...]
+usage: python experiments/analysis_bollywood.py [--v1|--v3] models/v7 [models/x ...]
 """
 import json
 import sys
@@ -32,7 +34,9 @@ from chordstream.vocab import IGNORE, NO_CHORD, to_majmin, transpose
 
 ROOT = Path("data/bollywood")
 V1 = "--v1" in sys.argv
-CACHE = Path("data/cache_bolly" if V1 else "data/cache_bolly2")
+V3 = "--v3" in sys.argv
+CACHE = Path("data/cache_bolly" if V1 else "data/cache_bolly3" if V3 else "data/cache_bolly2")
+DIAG = "align.jsonl" if V1 else "align_cache_bolly3.jsonl" if V3 else "align2.jsonl"
 
 
 def is_test(stem: str) -> bool:
@@ -60,9 +64,9 @@ def segs(path: np.ndarray, min_frames: int = 12) -> list[int]:
 
 
 def main(bundles):
-    rows = [json.loads(l) for l in (ROOT / ("align.jsonl" if V1 else "align2.jsonl")).read_text(encoding="utf-8").splitlines() if l.strip()]
+    rows = [json.loads(l) for l in (ROOT / DIAG).read_text(encoding="utf-8").splitlines() if l.strip()]
     diag = {r["id"]: {"shift": r["shift"] if V1 else r["capo"]} for r in rows}
-    ok = trusted_ids() if V1 else trusted_ids_v2()
+    ok = trusted_ids() if V1 else trusted_ids_v2(DIAG)
     files = [f for f in sorted(CACHE.glob("*.npz")) if is_test(f.stem) and f.stem.split("__")[-1] in ok]
     print(f"{len(files)} test songs")
     dev = "cuda" if torch.cuda.is_available() else "cpu"
