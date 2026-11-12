@@ -48,10 +48,11 @@ Comparisons inside one experiment always use the same set. Differences under ~0.
 | v2 | was live | 75.5% | 77.0% (19) | 1.9× | +80 ms | E09 |
 | v4 | was live | 78.8% | 80.1% (36 clean) | 1.6× | +80 ms | E15 |
 | v5 | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v5)) | 78.9% | 80.8% (36 clean) | 1.6× | +80 ms | E17 |
-| **v6** (extended vocab) | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v6)) | **79.9%** | **80.8% (36 clean)**; 70.3% full vocab | 1.6× | +80 ms | E18 |
+| v6 (extended vocab) | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v6)) | 79.9% | 80.8% (36 clean); 70.3% full vocab | 1.6× | +80 ms | E18 |
 | teacher (offline, sees ±5 s) | never | 82.0% | 82.9% (36 clean) | 1.04× | – | E17 |
 | E23b (label delay 240 ms, human labels) | candidate | 83.0% | 83.9% (36 clean) | 1.44× | +240 ms display | E23 |
 | E24 (extended, human labels) | baseline | 80.9% majmin | 81.0% majmin, 70.7% full (36 clean) | 1.71× | +80 ms | E24 |
+| **v7** (extended, 120 ms label delay, human labels) | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v7)) | **83.1%** majmin | **83.3% majmin, 73.0% full (36 clean)** | 1.48× | 120 ms display | E25 |
 
 Biggest wins: real data (E03, +28 pts over synthetic only), training budget (E13/E15, +2.4),
 more data (E08, +2), distillation (E17, +0.7), transition loss (E09, lag 120 → 40–80 ms).
@@ -335,13 +336,35 @@ Dates are the day the experiment ran.
   v6 as the non-distilled extended baseline. Not deployed by itself: E25 (with label delay) is the
   deployment candidate.
 
+### E25 · Extended vocabulary + label delay (120 / 240 ms) · 2026-11-12 — `models/e25a_ext_delay3`, `models/e25b_ext_delay6` → `v7`
+- **Script:** [`experiments/2026-11-12_ext_delay.ps1`](../experiments/2026-11-12_ext_delay.ps1)
+- **Setup:** E24 (extended vocabulary, structured heads, human labels only) + E23's `--label-delay 3` / `6`.
+- **Result (36 clean held-out; majmin view / full vocabulary / changes / change-F):**
+
+  | model | decoder | majmin | full | changes | change-F |
+  |---|---|---|---|---|---|
+  | v6 (distilled, zero delay) | deployed | 80.8% | 70.3% | 1.61× | 0.594 |
+  | E24 (zero delay) | bundle | 81.2% | 70.9% | 1.99× | 0.577 |
+  | E24 + fixed-lag 3 (120 ms) | bundle | 82.4% | 72.1% | 1.81× | 0.616 |
+  | **E25a** (delay 3, 120 ms) | bundle (power 3) | 83.5% | 73.1% | 1.64× | 0.654 |
+  | **E25a** | HMM 5 s / power 2 | **83.3%** | **73.0%** | **1.48×** | **0.669** |
+  | E24 + fixed-lag 6 (240 ms) | bundle | 82.5% | 72.3% | 1.66× | 0.646 |
+  | E25b (delay 6, 240 ms) | HMM 5 s / power 2 | 84.0% | 73.9% | 1.33× | 0.709 |
+
+  Original 10 (majmin): E25a 83.1% (v6 79.9%). Streaming check on a held-out song: 80.5% per frame
+  scored at the described frames (78.5% if the delay were ignored).
+- **Decision:** deployed **E25a** as **v7** (HMM 5 s / power 2; release
+  [`model-v7`](https://github.com/helloparthshah/chordstream/releases/tag/model-v7)): +2.5 pt majmin,
+  +2.7 pt full vocabulary and 8% fewer changes than v6, with 120 ms display delay and no distillation.
+  E25b is better still but 240 ms late on the live readout; E26 tests getting that accuracy on the
+  sheet only.
+
 ---
 
 ## Queue
 
 | ID | Experiment | Question | Notes |
 |---|---|---|---|
-| E25 | Extended vocabulary + label delay 3 / 6 (`experiments/2026-11-12_ext_delay.ps1`) | Do E23's gains carry over to the 109-class model? | Running. Baseline E24 and E24 + fixed-lag at equal delay. Deployment candidate (human labels only) |
 | E26 | Two delay heads in one network (`experiments/2026-11-12_sheet_head.ps1`): label delay 3 (live readout) + sheet head delay 8 / 12 | Does a longer delay push the sheet past 84%, at no extra compute? | From F02. Queued after E25. `--sheet-delay`; ONNX gets an optional `sheet_probs` output; the engine pools per-beat chords from it. Score with `analysis_fixed_lag.py models/x:sheet` |
 | E21 | Bollywood domain adaptation | All 394 labelled songs are US Billboard hits (1958–1991); no Bollywood | Human labels only (no-distillation policy): UG chord sheets anchored to timed lyrics (LRCLIB + Whisper) as approximately timed labels for sung sections, for both training and a timed test set; untimed sheet comparison as a fallback. First probe: *Raat Bhar* (Heropanti) with v6 vs its UG sheet (E, B, C♯m, A, D): key **matches** (E major); 93% of time on the sheet's chords (extra: G♯m 6%); 88% of the sheet's 75 changes found in order; over-segmented 136 vs 75 changes, mostly A↔C♯m and C♯m↔B wavering. Use this scoring (key, time-in-sheet, sequence coverage) for the Bollywood test set. **Timed labels idea:** UG sheets put chords over words and LRCLIB + Whisper time the words, so sheet + lyrics give approximately timed human chord labels for sung sections; use them as a timed test set and to check/correct teacher pseudo-labels. Note: training-label sync is checked against audio (fetch-time alignment, E14 audit), never lyrics; pseudo-labels are aligned by construction |
 | later | Seed repeats for v4 vs v5 | Is the distillation gain robust to training randomness? | Retrain both with a second seed (~40 min) |
@@ -357,7 +380,9 @@ Dates are the day the experiment ran.
 | `latest` | E01 | init for all models (keep) |
 | `bb_ft`, `v2`, `v3`, `v4` | E03, E09, E12, E15 | superseded; kept for comparison |
 | `v5` | E17 | previous live model, release `model-v5` |
-| `v6` | E18 | **live**, release `model-v6` |
+| `v6` | E18 | previous live model, release `model-v6` |
+| `v7` | E25 | **live**, release `model-v7` (= `e25a_ext_delay3` + HMM 5 s / power 2) |
+| `e25a_ext_delay3`, `e25b_ext_delay6` | E25 | extended label-delay models |
 | `teacher` | E17 | offline teacher for majmin distillation |
 | `exp_a`, `exp_b`, `exp_w2/3/5`, `exp_g10`, `synth_g10`, `exp_lr3`, `exp_big`, `synth_big`, `v4_clean`, `v4_orig`, `student` | E08–E17 | experiment outputs; safe to delete |
 | `ext_teacher` | E18 | offline teacher for extended-vocabulary distillation |

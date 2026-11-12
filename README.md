@@ -1,8 +1,10 @@
 # chordstream
 
-Real-time, zero-lookahead chord recognition from live audio. Each 40 ms of audio produces one
-decision, computed only from audio already heard. The live model (v6) names 108 chords
-(12 roots × maj, min, 7, maj7, m7, dim, aug, sus2, sus4) plus "no chord".
+Real-time chord recognition from live audio. Each 40 ms of audio produces one decision, computed
+only from audio already heard. The live model (v7) names the chord of the audio 120 ms ago: that
+short, trained-in delay lets each decision hear a little of what follows, which removes much of
+the flicker at chord changes. It names 108 chords (12 roots × maj, min, 7, maj7, m7, dim, aug,
+sus2, sus4) plus "no chord", and is trained on human-labelled data only.
 
 ## Architecture
 
@@ -36,7 +38,8 @@ flowchart LR
 
 ### Streaming engine (one 40 ms step)
 
-Everything is causal: each step uses only audio up to "now". The network runs incrementally, with
+Everything is causal: each step uses only audio up to "now". The network is trained to name the
+chord of 3 frames earlier (label delay, 120 ms), so its decision for a frame has heard 120 ms past it. The network runs incrementally, with
 the CNN on its 13-frame receptive field and a per-layer KV cache, so a step costs about 2–3 ms of CPU.
 
 ```mermaid
@@ -45,7 +48,7 @@ flowchart LR
     CQT --> NET["ChordNet step (ONNX)<br/>CNN + Transformer<br/>with KV cache"]
     NET --> P["Chord posteriors<br/>(109 classes)"]
     P --> HMM["Forward-only HMM<br/>no backtracking,<br/>no added latency"]
-    HMM --> LIVE["Live chord<br/>(zero lookahead)"]
+    HMM --> LIVE["Live chord<br/>(120 ms behind)"]
     P --> POOL["Average over the<br/>current beat"]
     CQT --> BT["Causal beat tracker<br/>onset flux, tempo, phase"]
     BT --> POOL
@@ -67,7 +70,9 @@ flowchart TB
 ```
 
 The extra heads let rare chords and power chords (which have no class) still teach the shared layers.
-The offline teacher is the same network with a symmetric ±5 s attention band and centred convolutions.
+Training targets are shifted 3 frames later (label delay), so output t names the chord at t − 3;
+the network itself is unchanged. An offline teacher (the same network with a symmetric ±5 s band) is
+kept only as a measuring stick: since v7 nothing is distilled from it.
 
 ### Training pipeline
 
@@ -78,13 +83,7 @@ flowchart TB
     BB["McGill Billboard annotations"] --> FETCH["YouTube fetch<br/>duration match"]
     FETCH --> ALIGN{"Chroma alignment check<br/>offset, key, drift"}
     ALIGN -- "pass (394)" --> AUD["Audit + re-time labels<br/>exclude drifting songs (367 kept)"]
-    ALIGN -- "reject (231)" --> UNL["Unlabelled audio"]
-    AUD --> TEA["Teacher<br/>bidirectional, offline"]
-    PRE --> TEA
-    TEA --> PS["Pseudo-labels<br/>teacher posteriors"]
-    UNL --> PS
-    AUD --> STU["Causal student<br/>labels + teacher KL<br/>+ transition weighting"]
-    PS --> STU
+    AUD --> STU["Causal model<br/>human labels, 120 ms label delay<br/>+ transition weighting<br/>+ root/bass/notes heads"]
     PRE --> STU
     STU --> EVAL["chordstream evaluate<br/>streaming-exact metrics"]
     EVAL --> EXP["ONNX export<br/>+ GitHub release"]
@@ -109,8 +108,8 @@ Every experiment behind these choices is in [docs/EXPERIMENTS.md](docs/EXPERIMEN
 Trained bundles are attached to GitHub Releases, so they don't bloat git history:
 
 ```powershell
-gh release download model-v6 --pattern "*.zip" --dir models
-Expand-Archive models/chordstream-v6.zip models; uv run chordstream serve --bundle models/v6
+gh release download model-v7 --pattern "*.zip" --dir models
+Expand-Archive models/chordstream-v7.zip models; uv run chordstream serve --bundle models/v7
 ```
 
 They were trained on copyrighted recordings, so keep them for personal use.
@@ -210,10 +209,11 @@ and a GPU recommended.
 
 ## Results
 
-The live model is **v6**, with an extended vocabulary (maj, min, 7, maj7, m7, dim, aug, sus2,
-sus4). Majmin accuracy is 80.8% on 36 clean held-out Billboard songs and 79.9% on the original 10
-(from 73.8% for the first fine-tuned model); full-vocabulary accuracy is 70.3%. It uses about
-2.4 ms of CPU per 40 ms frame with zero lookahead. Every experiment, including the ones that didn't help, is in
+The live model is **v7**, with an extended vocabulary (maj, min, 7, maj7, m7, dim, aug, sus2,
+sus4) and a 120 ms label delay, trained on human labels only. Majmin accuracy is 83.3% on 36 clean
+held-out Billboard songs and 83.1% on the original 10 (from 73.8% for the first fine-tuned model);
+full-vocabulary accuracy is 73.0%, and it makes 1.48× the reference number of chord changes (v6,
+with zero delay: 80.8%, 70.3%, 1.61×). It uses about 2.4 ms of CPU per 40 ms frame. Every experiment, including the ones that didn't help, is in
 **[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)**, with commands and decisions. The batch scripts
 are in [`experiments/`](experiments/).
 
