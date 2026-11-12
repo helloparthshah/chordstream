@@ -8,6 +8,113 @@ sus2, sus4) plus "no chord", and is trained on human-labelled data only: US Bill
 Bollywood songs whose chords come from Ultimate Guitar sheets. Chord names are spelled
 for the song's estimated key (G♯m in E major, D♭ in A♭ major).
 
+## How it works, step by step
+
+This section follows the sound from the microphone to the chord name on screen. Every step uses
+only audio that has already been heard, except the deliberate 120 ms delay in step 4. The diagrams
+under [Architecture](#architecture) show the same pipeline.
+
+```
+mic / file / system audio
+  → 1. browser: mono, 16 kHz, 40 ms chunks ──WebSocket──► server
+  → 2. CQT: 144 note-pitch energies per 40 ms frame
+  → 3. log compression
+  → 4. neural network: probabilities for 108 chords + "no chord"
+  → 5. HMM smoothing: the live chord
+  → 6. key detection + note spelling (C♯ vs D♭)
+  → 7. three views: live chord · steady big chord · chord sheet
+  (+ beat tracker for the BPM and pulse display)
+```
+
+**1. Capturing audio (browser).**
+- **Mic or system audio:** the browser opens a 16 kHz stream and resamples the input itself. Echo
+  cancellation, noise suppression and auto-gain are switched off, because they are built for speech
+  and would damage music.
+- **Played file:** it runs at the device's normal rate so it sounds right. A copy is low-passed at
+  7 kHz and averaged down to 16 kHz mono.
+- **Sending:** an AudioWorklet gathers 640 samples (40 ms) and sends each chunk to the server over a
+  WebSocket. Every chunk becomes exactly one chord decision.
+
+**2. Turning sound into pitches (constant-Q transform).** Chords are sets of notes, so the first job
+is measuring how much energy there is at each musical pitch.
+- **Range:** 144 bins cover 6 octaves, C2 (65 Hz) to B7 (~3.95 kHz). There are 2 bins per semitone,
+  so slightly out-of-tune recordings still land cleanly.
+- **How a bin works:** each bin is a filter tuned to its pitch.
+  - Low notes need long windows to tell C from C♯: about 0.2 s at 65 Hz. High notes need only ~8 ms.
+  - A small variable-Q offset (`gamma` = 3 Hz) shortens the lowest windows, so bass notes don't smear
+    across chord changes.
+- **No look-ahead:** every window ends at the current sample.
+- **Identical features:** the live server and the training code compute the same numbers, and a test
+  checks this.
+
+**3. Log compression.** Each energy becomes `log(1 + 100 × energy)`, which is roughly how the ear
+works. A note twice as loud doesn't count twice as much, so quiet inner voices of a chord still
+register next to a loud melody note. The result is one row of 144 numbers every 40 ms.
+
+**4. The neural network (the recogniser).** It reads the stream of rows and outputs 109
+probabilities: 12 roots × 9 chord types (maj, min, 7, maj7, m7, dim, aug, sus2, sus4) plus "no
+chord".
+- **Pattern detector (a small CNN):**
+  - Three blocks of 2D filters slide over pitch × time. They learn local patterns such as "energy at
+    C, E and G", overtone stacks, and note onsets.
+  - The filters only look backwards in time.
+  - Each block halves the pitch resolution, from 144 bins down to 18 positions × 64 learned
+    features. Each output sees 13 frames (~0.5 s).
+- **Context (a Transformer):**
+  - 4 layers; at each layer the current frame can attend to up to the previous 128 frames (~5 s), and
+    nearer frames count more.
+  - This is where musical context enters. If the last few seconds were clearly A major, an ambiguous
+    frame leans towards the chords that fit.
+- **Streaming:** the server keeps each layer's memory of past frames (a KV cache), so each new frame
+  costs one step, about 2.4 ms of CPU.
+- **The 120 ms delay (E23):** the model is trained so its output at time t names the chord at
+  t − 120 ms. Each decision has therefore heard 120 ms of what comes next, which removes much of the
+  flicker exactly at chord changes.
+- **Training data:** human labels only.
+  - ~330 US Billboard songs.
+  - 152 Bollywood songs whose chords come from Ultimate Guitar sheets, timed by a chroma-alignment
+    step with no neural model involved.
+- **Training extras:**
+  - Random pitch shifts, so every song also appears in other keys.
+  - Training-only outputs for the root, the bass note and each of the 12 notes, which help rare
+    chords.
+  - Extra weight on frames near chord changes.
+
+**5. HMM smoothing (choosing the live chord).** Network outputs jitter from frame to frame, so a
+hidden Markov model filters them using only the past.
+- **Steadiness:** a chord tends to last. The model assumes a 5 s average chord, so at each frame there
+  is a 99.2% chance the chord continues.
+- **Likely next chords:** when the chord changes, the likely successors come from progression
+  statistics.
+- **Evidence:** each frame's probabilities are first divided by how common each chord was in
+  training, so common chords don't win just for being common. They are then squared, which trusts
+  the network more and lets clear changes through quickly.
+- **Output:** the most likely chord is the live chord, sent with its confidence.
+
+**6. Key detection and spelling.** A rolling history of the chords' notes over the last ~30 s picks
+the most likely key. It only switches when another key fits at least 10% better, so it doesn't jump
+around. The key decides spelling (C♯m in E major, D♭ in A♭ major) and is shown next to the BPM.
+
+**7. What you see: three views of the same decisions.**
+
+| View | Rule | Trade-off |
+|---|---|---|
+| Small "hearing D…" line, or the big chord in **Instant** mode | the HMM chord every 40 ms | fastest; flickers (~46 changes/min vs ~26 in real songs) |
+| **Big chord (Steady, default)** | switches at once unless the network still gives the old chord ≥ 5%; then the new chord must hold 20 frames (≤ 0.8 s) | ~70% fewer flashes for 0.6 pt accuracy (F05) |
+| **Chord sheet and progression** | written only after a chord holds 480 ms, then placed where it actually started | almost exactly the real number of changes; most accurate (F03) |
+
+**Alongside: the beat tracker.** It runs on the same pitch rows. It measures how fast energy rises
+(onsets), estimates the tempo and predicts the next beat, which drives the BPM, the pulse dot and the
+timeline. It doesn't improve chord accuracy (E05, E16), so it is display-only.
+
+**Known weaknesses** (being worked on; see [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)):
+- **Bass dependence:** without bass, Bollywood accuracy falls to 47%. Inverted chords (C/E) are named
+  after their bass note about half the time (F07). The fixes being tested are bass dropout and random
+  EQ in training (E31, E32).
+- **Brief wrong flashes:** about 6 per minute in the live chord, mostly to the chord a fourth or fifth
+  away (F04). The Steady display hides most of them.
+- **Room echo:** costs about 5 pt of accuracy but adds no flicker (F06).
+
 ## Architecture
 
 ### System
