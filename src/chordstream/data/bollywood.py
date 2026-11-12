@@ -321,3 +321,11 @@ def stage_cache(out: str | Path = "data/cache_bolly", device: str | None = None)
         n += 1
         print(f"  {s['song']}: shift {r['shift']} margin {r['margin']:.3f}", flush=True)
     return {"cached": n}
+
+
+def trusted_ids() -> set[str]:
+    """Songs whose aligned transposition equals the sheet's capo (no capo = 0): an independent check
+    that the alignment found the right key. 60 / 98 at first run; most others are off by a fifth,
+    which chroma confuses."""
+    rows = [json.loads(l) for l in (ROOT / "align.jsonl").read_text(encoding="utf-8").splitlines()]
+    return {r["id"] for r in rows if r["shift"] == (r["capo"] or 0) % 12}

@@ -425,7 +425,25 @@ Dates are the day the experiment ran.
   time on the sheet's chords, in-order coverage of the sheet's changes), aligned-frame accuracy as
   a secondary measure; fine-tune v7's recipe on Billboard + aligned Bollywood songs (low-margin
   alignments excluded) and compare on the Bollywood test set and the 36 Billboard songs.
-- **Status:** songs collected; sheet matching running.
+- **Data:** 266 playlist songs → 175 UG matches → 106 pass the plausibility check → 98 after
+  removing duplicates (same sheet via two playlists) → all 98 downloaded and aligned.
+- **Alignment check against the capo:** the transposition the aligner picks equals the sheet's
+  capo (none = 0) on **60 / 98** songs, an independent confirmation of the alignment. Most of the
+  rest are off by a fifth (e.g. capo 1 → shift 8), which chroma confuses. Only these 60 are used
+  (`bollywood.trusted_ids`): 19 test songs (30% by hash of the cache name), 41 for training.
+- **Baseline (19 Bollywood test songs, `experiments/analysis_bollywood.py`):**
+
+  | model | in sheet | coverage | changes | aligned majmin / full |
+  |---|---|---|---|---|
+  | v6 | 88.6% | 70.5% | 0.99× | 54.5% / 47.3% |
+  | v7 | 88.2% | 71.7% | 0.96× | 55.8% / 50.0% |
+
+  The chords used are mostly the sheet's (88%), but frame agreement with the aligned labels is far
+  below Billboard (83%): partly label noise (the aligner is ~78–80% on Billboard, likely less here),
+  partly a domain gap.
+- **Training** ([`2026-11-12_bollywood.ps1`](../experiments/2026-11-12_bollywood.ps1)): `data/cache_ext`
+  + the 41 training songs linked 3× (prefix `bollytrain__`, never held out); E21a = v7's recipe from
+  the synthetic init, E21b = v7 fine-tuned 20 epochs at lr 1e-4. Running.
 
 ### E27 · Rare chord types from synthetic renders · 2026-11-12 — `models/e27_rare`
 - **Script:** [`experiments/2026-11-12_rare_chords.ps1`](../experiments/2026-11-12_rare_chords.ps1)
@@ -446,8 +464,13 @@ Dates are the day the experiment ran.
   | 7 / maj7 / m7 recall | **44 / 48 / 55%** | 40 / 43 / 51% |
 
 - **Decision:** not deployed. The rare types are learnable from synthetic audio, but at 30% of
-  songs the synthetic share costs 0.5–0.7 pt overall (7th chords most). E27b tries a lighter
-  mix (50 renders, ~12%).
+  songs the synthetic share costs 0.5–0.7 pt overall (7th chords most).
+- **E27b** (50 renders, ~12% of songs; [`2026-11-12_rare_chords_light.ps1`](../experiments/2026-11-12_rare_chords_light.ps1)):
+  majmin 83.1% / full 72.8% (v7 83.3% / 73.0%, within noise), original 10 83.3% (v7 83.1%),
+  changes 1.65×; dim recall **50%** (v7 4%), aug 5%, sus4 18% (v7 15%), 7 / maj7 / m7 43 / 45 / 54%.
+  Bollywood test: level with v7 (in sheet 87.8%, coverage 71.6%).
+- **Decision (E27b):** keeps most of the diminished-chord gain at no measurable cost; deployment
+  decided together with E21.
 
 ### D01 · Key-aware chord spelling (display) · 2026-11-12
 - Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`
@@ -461,8 +484,7 @@ Dates are the day the experiment ran.
 
 | ID | Experiment | Question | Notes |
 |---|---|---|---|
-| E21 | Bollywood (above) | v7 on Bollywood; fine-tune with sheet-aligned labels | In progress |
-| E27b | Lighter rare-chord mix (50 renders, ~12% of songs; `experiments/2026-11-12_rare_chords_light.ps1`) | Keep most of E27's rare-chord recall without the overall cost? | Running |
+| E21 | Bollywood (above) | Does training on sheet-aligned Bollywood songs help on Bollywood without hurting Billboard? | Training running |
 | later | More Bollywood / Indian labelled data | Depends on E21 | More years, regional playlists |
 
 
@@ -478,6 +500,7 @@ Dates are the day the experiment ran.
 | `e25a_ext_delay3`, `e25b_ext_delay6` | E25 | extended label-delay models |
 | `e26a_sheet8`, `e26b_sheet12` | E26 | rejected; safe to delete |
 | `e27_rare` | E27 | rare-chord mix (150 renders); not deployed |
+| `e27b_rare50` | E27b | rare-chord mix (50 renders); candidate |
 | `teacher` | E17 | offline teacher for majmin distillation |
 | `exp_a`, `exp_b`, `exp_w2/3/5`, `exp_g10`, `synth_g10`, `exp_lr3`, `exp_big`, `synth_big`, `v4_clean`, `v4_orig`, `student` | E08–E17 | experiment outputs; safe to delete |
 | `ext_teacher` | E18 | offline teacher for extended-vocabulary distillation |

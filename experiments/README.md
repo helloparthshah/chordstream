@@ -15,6 +15,7 @@ They assume the synthetic init `models/latest` and the caches built by the CLI:
 | `data/cache_rare` | `chordstream synth --rare` + `features --extended synthx` | rare-chord renders, training only (E27) |
 | `data/cache_ext_rare`, `data/cache_ext_rare50` | experiment scripts (hard links) | `cache_ext` + 150 / 50 rare renders (E27, E27b) |
 | `data/cache_bolly` | `chordstream bollywood cache` | Bollywood songs, sheet-aligned labels (E21) |
+| `data/cache_ext_bolly` | `2026-11-12_bollywood.ps1` (hard links) | `cache_ext` + trusted Bollywood training songs ×3 (E21) |
 
 **Analyses** (`analysis_*.py`, `uv run --no-sync python experiments/<script> ...`; usage in each docstring):
 

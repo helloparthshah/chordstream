@@ -7,6 +7,8 @@ Timing-free sheet metrics (from the UG sheet, transposed by the aligner's chosen
 Secondary: frame accuracy against the sheet-aligned labels (majmin view and full vocabulary).
 Predictions are the live HMM path (what the readout shows), at the frames they describe.
 
+Only songs whose alignment transposition matches the sheet's capo (bollywood.trusted_ids).
+
 usage: python experiments/analysis_bollywood.py models/v7 [models/x ...]
 """
 import json
@@ -17,6 +19,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from chordstream.data.bollywood import trusted_ids
 from chordstream.evaluate import majmin_view
 from chordstream.export import load_net
 from chordstream.hmm import OnlineHMM
@@ -52,7 +55,8 @@ def segs(path: np.ndarray, min_frames: int = 12) -> list[int]:
 
 def main(bundles):
     diag = {json.loads(l)["id"]: json.loads(l) for l in (ROOT / "align.jsonl").read_text(encoding="utf-8").splitlines()}
-    files = [f for f in sorted(CACHE.glob("*.npz")) if is_test(f.stem)]
+    ok = trusted_ids()  # alignment key agrees with the sheet's capo
+    files = [f for f in sorted(CACHE.glob("*.npz")) if is_test(f.stem) and f.stem.split("__")[-1] in ok]
     print(f"{len(files)} test songs")
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     for b in bundles:

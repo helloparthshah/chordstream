@@ -111,7 +111,7 @@ def cache_features(src_dirs: list[str | Path], out: str | Path, cfg: FrontendCon
     return n
 
 
-TRAIN_ONLY = ("synthx__",)
+TRAIN_ONLY = ("synthx__", "bollytrain__")  # synthetic renders; Bollywood training copies (E21)
 
 
 def cache_features_ext(src: str | Path, out: str | Path, prefix: str, cfg: FrontendConfig | None = None,
