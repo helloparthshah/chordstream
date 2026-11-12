@@ -359,13 +359,44 @@ Dates are the day the experiment ran.
   E25b is better still but 240 ms late on the live readout; E26 tests getting that accuracy on the
   sheet only.
 
+### E26 · Two delay heads (live 120 ms + sheet 320 / 480 ms) · 2026-11-12 — `models/e26a_sheet8`, `models/e26b_sheet12`
+- **Script:** [`experiments/2026-11-12_sheet_head.ps1`](../experiments/2026-11-12_sheet_head.ps1)
+- **Setup:** E25a's recipe plus a second chord head trained with `--sheet-delay 8` / `12`.
+- **Result (36 clean held-out, HMM 5 s / power 2; majmin / full / changes):** live heads 82.7% /
+  72.4% / 1.50× (v7 alone: 83.3% / 73.0% / 1.48×, so sharing the trunk costs 0.6 pt); sheet heads
+  83.8% / 73.6% / 1.25× (delay 8) and 83.9% / 73.7% / 1.20× (delay 12), no better than E25b's single
+  delay-6 head (84.0% / 73.9%). Gains from delay saturate around 240 ms.
+- **Decision:** rejected. The code (`--sheet-delay`, optional `sheet_probs` ONNX output) stays, unused.
+
+### F03 · What should the chord sheet be built from? · 2026-11-12
+- **Script:** [`experiments/analysis_beat_sheet.py`](../experiments/analysis_beat_sheet.py); 36 clean held-out.
+- **Per-beat averaging (E16's engine) no longer helps:** for label-delay models, averaging
+  posteriors over causal-tracker beats is *worse* than the HMM path (v7: 82.3% vs 83.3% majmin;
+  E25b 82.0% vs 84.0%); a majority vote of the HMM path per beat is no better (81.9–82.3%). It still
+  helps the zero-delay v6 (81.8% vs 80.8%), which is why E16 adopted it. Imperfect beat edges cost
+  more than the averaging gains once the network already has some future context.
+- **Minimum-hold commit (the useful form of F02's "speculative" idea):** the sheet commits a chord
+  only once the live HMM chord has held k frames, backdated to where it started:
+
+  | v7, hold k | majmin | full | changes |
+  |---|---|---|---|
+  | 0 (HMM path) | 83.3% | 73.0% | 1.60× |
+  | 5 (200 ms) | 83.3% | 73.0% | 1.35× |
+  | 8 (320 ms) | 83.4% | 73.3% | 1.18× |
+  | **12 (480 ms)** | **83.4%** | **73.4%** | **1.03×** |
+
+  (changes here on the full vocabulary.) E25b with 12: 84.1% / 74.2% / 1.03×.
+- **Decision:** adopted in the engine (`ChordStream(sheet_min_frames=12)`): the live readout shows
+  every decision 120 ms late; the sheet commits after 480 ms, which is about as late as the old
+  per-beat chords, and has essentially the reference number of chord changes. Streaming check on 4
+  held-out songs: 0.99× the reference changes.
+
 ---
 
 ## Queue
 
 | ID | Experiment | Question | Notes |
 |---|---|---|---|
-| E26 | Two delay heads in one network (`experiments/2026-11-12_sheet_head.ps1`): label delay 3 (live readout) + sheet head delay 8 / 12 | Does a longer delay push the sheet past 84%, at no extra compute? | From F02. Queued after E25. `--sheet-delay`; ONNX gets an optional `sheet_probs` output; the engine pools per-beat chords from it. Score with `analysis_fixed_lag.py models/x:sheet` |
 | E21 | Bollywood domain adaptation | All 394 labelled songs are US Billboard hits (1958–1991); no Bollywood | Human labels only (no-distillation policy): UG chord sheets anchored to timed lyrics (LRCLIB + Whisper) as approximately timed labels for sung sections, for both training and a timed test set; untimed sheet comparison as a fallback. First probe: *Raat Bhar* (Heropanti) with v6 vs its UG sheet (E, B, C♯m, A, D): key **matches** (E major); 93% of time on the sheet's chords (extra: G♯m 6%); 88% of the sheet's 75 changes found in order; over-segmented 136 vs 75 changes, mostly A↔C♯m and C♯m↔B wavering. Use this scoring (key, time-in-sheet, sequence coverage) for the Bollywood test set. **Timed labels idea:** UG sheets put chords over words and LRCLIB + Whisper time the words, so sheet + lyrics give approximately timed human chord labels for sung sections; use them as a timed test set and to check/correct teacher pseudo-labels. Note: training-label sync is checked against audio (fetch-time alignment, E14 audit), never lyrics; pseudo-labels are aligned by construction |
 | later | Seed repeats for v4 vs v5 | Is the distillation gain robust to training randomness? | Retrain both with a second seed (~40 min) |
 | later | Key-aware chord spelling | Names use one fixed spelling (A♭m instead of G♯m in E major) | Display only |
@@ -383,6 +414,7 @@ Dates are the day the experiment ran.
 | `v6` | E18 | previous live model, release `model-v6` |
 | `v7` | E25 | **live**, release `model-v7` (= `e25a_ext_delay3` + HMM 5 s / power 2) |
 | `e25a_ext_delay3`, `e25b_ext_delay6` | E25 | extended label-delay models |
+| `e26a_sheet8`, `e26b_sheet12` | E26 | rejected; safe to delete |
 | `teacher` | E17 | offline teacher for majmin distillation |
 | `exp_a`, `exp_b`, `exp_w2/3/5`, `exp_g10`, `synth_g10`, `exp_lr3`, `exp_big`, `synth_big`, `v4_clean`, `v4_orig`, `student` | E08–E17 | experiment outputs; safe to delete |
 | `ext_teacher` | E18 | offline teacher for extended-vocabulary distillation |

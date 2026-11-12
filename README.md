@@ -49,11 +49,10 @@ flowchart LR
     NET --> P["Chord posteriors<br/>(109 classes)"]
     P --> HMM["Forward-only HMM<br/>no backtracking,<br/>no added latency"]
     HMM --> LIVE["Live chord<br/>(120 ms behind)"]
-    P --> POOL["Average over the<br/>current beat"]
+    HMM --> HOLD["Commit once held 480 ms,<br/>backdated to its start"]
+    HOLD --> BEAT["Chord sheet + progression<br/>(blips never reach it)"]
     CQT --> BT["Causal beat tracker<br/>onset flux, tempo, phase"]
-    BT --> POOL
     BT --> BPM["BPM + beat pulse"]
-    POOL --> BEAT["Per-beat chord<br/>(one beat late)<br/>for the sheet"]
 ```
 
 ### Model (ChordNet)

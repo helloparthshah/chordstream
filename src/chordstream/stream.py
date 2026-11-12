@@ -3,7 +3,7 @@
 Each 40 ms hop of audio yields exactly one decision, computed from audio up to and
 including that hop: zero lookahead. A label-delay model (E23, `label_delay` = d frames) names the
 chord of the frame d hops ago instead, so its decisions use d frames of "future" context; events
-then carry `delay` = d x 40 ms and the per-beat chords are pooled over the frames they describe. Algorithmic latency is one hop (40 ms) plus
+then carry `delay` = d x 40 ms. Chord-sheet commits are backdated to the frames they describe. Algorithmic latency is one hop (40 ms) plus
 compute time (printed by `chordstream transcribe --bench`).
 """
 
@@ -34,10 +34,11 @@ class ChordEvent:
     beat: bool = False  # a beat is predicted to fall in this frame (display only)
     bpm: float = 0.0
     beat_conf: float = 0.0
-    # Set on the frame that closes a beat: the chord of the whole beat that just ended
-    # (network posteriors averaged over the beat). One beat late by design; used for the
-    # chord sheet / progression, never for the live display. Measured +1.3 pt and ~30%
-    # less over-segmentation vs per-frame decisions on held-out Billboard songs.
+    # Chord-sheet commit (F03): set when the live chord has held for `sheet_min_frames`; names that
+    # chord and when it started (beat_t0, in described time). Used for the chord sheet /
+    # progression, never for the live display. With v7 and 12 frames (480 ms): 83.4% majmin,
+    # 1.03x the reference number of changes, vs 82.3% / beat-averaged posteriors (E16's method).
+    # (Field names kept from the earlier per-beat version for client compatibility.)
     beat_label: str | None = None
     beat_name: str | None = None
     beat_t0: float | None = None
@@ -48,7 +49,9 @@ class ChordEvent:
 
 
 class ChordStream:
-    def __init__(self, bundle_dir: str | Path, threads: int = 2, smoothing: bool = True):
+    def __init__(self, bundle_dir: str | Path, threads: int = 2, smoothing: bool = True,
+                 sheet_min_frames: int = 12):
+        self.sheet_min_frames = sheet_min_frames
         import onnxruntime as ort
 
         bundle_dir = Path(bundle_dir)
@@ -76,9 +79,9 @@ class ChordStream:
         self.k, self.v = self.k0.copy(), self.v0.copy()
         self.n_frames = 0
         self.current = -1
-        self.beat_acc = np.zeros(self.cfg.model.n_classes, np.float64)
-        self.beat_start = 0.0
-        self.pending_beats: list[int] = []  # frame counts where a beat was flagged, not yet pooled
+        self.run_len = 0  # frames the live chord has held
+        self.run_t0 = 0.0  # start of the current run, in described time
+        self.committed = -1  # last chord written to the sheet
         self.compute_ms: list[float] = []
         if self.hmm:
             self.hmm.reset()
@@ -95,8 +98,6 @@ class ChordStream:
             self.frames[0, -1] = frame
             outs = self.sess.run(None, {"frames": self.frames, "k_cache": self.k, "v_cache": self.v})
             probs, self.k, self.v = outs[0][0], outs[1], outs[2]
-            # E26: per-beat chords come from the sheet head (longer delay) when the model has one.
-            pool, d = (outs[3][0], self.cfg.model.sheet_delay) if len(outs) > 3 else (probs, self.cfg.model.label_delay)
             raw = int(probs.argmax())
             idx, conf = self.hmm.step(probs) if self.hmm else (raw, float(probs[raw]))
             b = self.beats.step(frame)
@@ -106,19 +107,17 @@ class ChordStream:
             self.current = idx
             fs = self.cfg.frontend.frame_seconds
             now = self.n_frames * fs
+            delay = self.cfg.model.label_delay * fs
             ev = ChordEvent(now, idx, CLASS_NAMES[idx], pretty_name(idx), conf, raw, changed, b.beat,
-                            round(b.bpm, 1), round(b.confidence, 2), delay=self.cfg.model.label_delay * fs)
-            if self.n_frames > d:  # pooled probs describe frame n_frames - d; earlier ones describe nothing
-                self.beat_acc += pool
-            if b.beat:
-                self.pending_beats.append(self.n_frames)
-            # A beat closes once the frames it covers have all been described (d hops after the beat).
-            if self.pending_beats and self.n_frames - d >= self.pending_beats[0]:
-                end = self.pending_beats.pop(0) * fs
-                j = int(self.beat_acc.argmax())
-                ev.beat_label, ev.beat_name, ev.beat_t0 = CLASS_NAMES[j], pretty_name(j), round(self.beat_start, 3)
-                self.beat_acc[:] = 0.0
-                self.beat_start = end
+                            round(b.bpm, 1), round(b.confidence, 2), delay=delay)
+            # Sheet: commit a chord once it has held sheet_min_frames, backdated to where it began,
+            # so blips shorter than that never reach the sheet (the live readout still shows them).
+            if changed:
+                self.run_len, self.run_t0 = 0, now - delay - fs
+            self.run_len += 1
+            if self.run_len >= self.sheet_min_frames and idx != self.committed:
+                self.committed = idx
+                ev.beat_label, ev.beat_name, ev.beat_t0 = CLASS_NAMES[idx], pretty_name(idx), round(self.run_t0, 3)
             events.append(ev)
         return events
 
