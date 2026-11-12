@@ -212,6 +212,7 @@ def train(
             bundle.model.key_input = model_cfg.key_input
             bundle.model.label_delay = model_cfg.label_delay
             bundle.model.sheet_delay = model_cfg.sheet_delay
+            bundle.model.context_frames = model_cfg.context_frames  # E34: ALiBi, so the band can change
     else:
         bundle = BundleConfig(frontend_cfg or FrontendConfig(), model_cfg or ModelConfig())
     if bidirectional:  # offline teacher (weights from a causal init transfer: same shapes)

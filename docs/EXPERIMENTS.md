@@ -57,7 +57,8 @@ Comparisons inside one experiment always use the same set. Differences under ~0.
 | v6 (extended vocab) | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v6)) | 79.9% | 80.8% (36 clean); 70.3% full vocab | 1.6× | +80 ms | E18 |
 | teacher (offline, sees ±5 s) | never | 82.0% | 82.9% (36 clean) | 1.04× | – | E17 |
 | E23b (label delay 240 ms, human labels) | candidate | 83.0% | 83.9% (36 clean) | 1.44× | +240 ms display | E23 |
-| **v9** (v7 recipe + 152 Bollywood songs ×2, cleaned sheet labels) | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v9)) | 77.1% majmin | 80.2% majmin, 67.7% full (36 clean); **Bollywood 80.0% / 77.4%** (61) | 1.62× | 120 ms display | E28b |
+| **v10** (v9 + random EQ + bass dropout) | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v10)) | – | 79.5% majmin, 66.8% full (36 clean); 78.1 / 71.0% without bass < 150 / 300 Hz; **Bollywood 79.1% / 76.5%** (61), 71.9 / 58.5% without bass | 1.68× | 120 ms display | E32b |
+| v9 (v7 recipe + 152 Bollywood songs ×2, cleaned sheet labels) | superseded ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v9)) | 77.1% majmin | 80.2% majmin, 67.7% full (36 clean); **Bollywood 80.0% / 77.4%** (61) | 1.62× | 120 ms display | E28b |
 | v8 (v7 + 47 Bollywood songs, cleaned sheet labels) | superseded ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v8)) | 79.6% majmin | 81.8% majmin, 70.5% full (36 clean); **Bollywood 80.0% / 78.0%** (23) | 1.56× | 120 ms display | E21e |
 | E24 (extended, human labels) | baseline | 80.9% majmin | 81.0% majmin, 70.7% full (36 clean) | 1.71× | +80 ms | E24 |
 | v7 (extended, 120 ms label delay, human labels) | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v7)) | **83.1%** majmin | **83.3% majmin, 73.0% full (36 clean)** | 1.48× | 120 ms display | E25 |
@@ -720,14 +721,64 @@ Dates are the day the experiment ran.
   - Inverted chords are mostly named after their bass note.
 - **Next:** E31, bass dropout in training.
 
-### E31 · Bass dropout · 2026-11-12 — running
+### E31 · Bass dropout · 2026-11-12 — `models/e31a_bassdrop3`, `models/e31b_bassdrop6`
 
 - **Script:** [`2026-11-12_bass_dropout.ps1`](../experiments/2026-11-12_bass_dropout.ps1).
 - **Setup:** v9's recipe and data, plus `--bass-dropout 0.3 / 0.6`. That share of training crops has
   everything below a random cutoff removed or attenuated to at most 30%, with a 2-semitone ramp. The
-  cutoff is 6–30 semitones above C2, i.e. 92–370 Hz.
-- The rest of the crops keep their bass, so the model sees every song both with and without bass.
-- Scored on the clean test sets and with F07's bass-removed audio.
+  cutoff is 92–370 Hz.
+- The other crops keep their bass, so the model sees every song both with and without bass. This was
+  the user's request.
+
+### E32 · Random EQ (user idea) · 2026-11-12 — `models/e32a_eq5`, `models/e32b_eq5_bass3` → `v10`
+
+- **Script:** [`2026-11-12_random_eq.ps1`](../experiments/2026-11-12_random_eq.ps1). E32a was rerun via
+  `_random_eq_a_rerun.ps1`: the first run hit CUDA out-of-memory while an evaluation shared the 4 GB GPU.
+- **Setup:** v9's recipe and data, plus `--random-eq 0.5`. Half of the crops pass through a random EQ
+  curve, applied exactly on the log1p features: `dataset.random_eq_db` / `apply_gain_db`.
+  - low shelf: usually cut, up to 40 dB, corner 70–400 Hz;
+  - high shelf: −24…+6 dB, 1–3.5 kHz;
+  - tilt: ±6 dB;
+  - 0–3 peaks or notches.
+- b also uses E31's bass dropout 0.3.
+- **Result** (majmin, HMM 5 s / power 2; F07's `analysis_bass.py`):
+
+  | | Billboard clean | Billboard no bass < 150 / < 300 Hz | inverted | Bollywood clean | Bollywood no bass < 150 / < 300 Hz | **overall clean** |
+  |---|---|---|---|---|---|---|
+  | v9 | **80.2%** | 76.4 / 65.2% | **46.6%** | **80.0%** | 66.8 / 46.8% | **80.1%** |
+  | E31a (dropout 0.3) | 79.5% | 77.9 / 69.7% | 45.0% | 79.0% | 70.9 / 55.6% | 79.25% |
+  | E31b (dropout 0.6) | 79.5% | 77.9 / 70.3% | 43.5% | 79.1% | 71.0 / 57.0% | 79.3% |
+  | E32a (EQ 0.5) | 79.8% | 77.3 / 69.0% | 44.6% | 79.5% | 69.9 / 54.0% | 79.65% |
+  | **E32b (EQ 0.5 + dropout 0.3)** | 79.5% | **78.1 / 71.0%** | 43.5% | 79.1% | **71.9 / 58.5%** | 79.3% |
+
+- **Findings:**
+  - All variants trade about 0.5–0.8 pt on clean audio for large gains without bass: Bollywood
+    +5 / +12 pt for E32b.
+  - Random EQ and dropout combine best.
+  - Inverted chords don't improve. The model still names a chord after a real non-root bass. That
+    needs labelled inversions, not augmentation.
+  - Frames that are naturally low in bass don't improve either; these are mostly sparse passages.
+- **Decision:** deployed **E32b as v10** (HMM 5 s / power 2, ONNX parity 3.2e-06), under the user's
+  cost-benefit rule: "if we're seeing massive improvement in one sector while minor regression
+  overall then it's worth switching".
+
+### E33 · Learned raw-waveform front end (user idea) · 2026-11-12 — running
+
+- **Code:** [`chordstream/rawfront.py`](../src/chordstream/rawfront.py) and
+  [`experiments/train_raw.py`](../experiments/train_raw.py); raw audio is cached by
+  `prepare_raw.py` in `data/raw16k`.
+- **Setup:** the CQT is replaced by a causal strided Conv1d on the 16 kHz waveform.
+  - 2 × 144 filters of 4096 samples (256 ms), stride 640, random init.
+  - Each filter pair gives a magnitude, then log1p with a learned scale.
+  - Its output feeds the same ChordNet; data, labels and delay are as in v9.
+  - Pitch shift is done by resampling, with the labels time-stretched to match.
+- **Runs:** a: ChordNet from `models/latest`, front end random; b: everything from scratch.
+- **Question:** can a network learn its own pitch analysis as well as the CQT?
+
+### E34 · 16 s attention context · 2026-11-12 — queued after E33
+
+- **Setup:** v9's recipe with `--context 400` (16 s, about 8 bars at 120 BPM) instead of 128 (5 s),
+  batch 16. Prompted by a pipeline description the user shared that suggests 4–8 bars of context.
 
 ### D01 · Key-aware chord spelling (display) · 2026-11-12
 - Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`
@@ -762,7 +813,9 @@ Dates are the day the experiment ran.
 | `e21a_bolly`, `e21b_bolly_ft` | E21 | Bollywood mix (scratch / fine-tune); Billboard regression, not deployed |
 | `e21a_live` | E21 | `e21a_bolly` + HMM 5 s / power 2, exported; was on trial in the UI; safe to delete |
 | `v8` | E21e | previous live model, release `model-v8` (= `e21e_bolly_clean` + HMM 5 s / power 2) |
-| `v9` | E28b | **live**, release `model-v9` (= `e28b_bolly3x2` + HMM 5 s / power 2) |
+| `v9` | E28b | previous live model, release `model-v9` (= `e28b_bolly3x2` + HMM 5 s / power 2) |
+| `v10` | E32b | **live**, release `model-v10` (= `e32b_eq5_bass3` + HMM 5 s / power 2) |
+| `e31a_bassdrop3`, `e31b_bassdrop6`, `e32a_eq5`, `e32b_eq5_bass3` (+ `_h5p2`) | E31, E32 | bass dropout / random EQ; e32b = v10 |
 | `e21c_bolly_mask3`, `e21d_bolly_mask1`, `e21e_bolly_clean`, `e21f_bolly_clean_rare` | E21 | Bollywood variants (e21e = v8) |
 | `e28a_bolly3x1`, `e28b_bolly3x2` (+ `_h5p2` eval copies) | E28 | scaled Bollywood mixes; e28b = v9 |
 | `e29_room` (+ `_h5p2`) | E29 | room-echo copies; not deployed |
