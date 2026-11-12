@@ -41,15 +41,19 @@ def _ydl(extra: dict | None = None):
                              **YDL_EXTRA, **(extra or {})})
 
 
-def find_playlist(year: int) -> dict | None:
-    q = urllib.parse.quote_plus(f"top bollywood songs {year}")
-    with _ydl({"playlistend": 15}) as y:
+def find_playlists(year: int, n: int = 1, query: str = "top bollywood songs {year}") -> list[dict]:
+    """Up to n playlists whose title names the year, record labels' own playlists first."""
+    q = urllib.parse.quote_plus(query.format(year=year))
+    with _ydl({"playlistend": 20}) as y:
         info = y.extract_info(f"https://www.youtube.com/results?search_query={q}&sp=EgIQAw%253D%253D", download=False)
-    entries = [e for e in info.get("entries", []) if e.get("id", "").startswith("PL")]
-    for e in entries:  # prefer a record label's own playlist, then any whose title names the year
-        if any(l in (e.get("channel") or e.get("uploader") or "").lower() for l in LABELS) and str(year) in e.get("title", ""):
-            return e
-    return next((e for e in entries if str(year) in e.get("title", "")), None)
+    entries = [e for e in info.get("entries", []) if e.get("id", "").startswith("PL") and str(year) in e.get("title", "")]
+    label = [e for e in entries if any(l in (e.get("channel") or e.get("uploader") or "").lower() for l in LABELS)]
+    return (label + [e for e in entries if e not in label])[:n]
+
+
+def find_playlist(year: int) -> dict | None:
+    found = find_playlists(year, 1)
+    return found[0] if found else None
 
 
 def playlist_entries(pid: str, limit: int) -> list[dict]:
@@ -159,26 +163,27 @@ def ug_sheet(tab_url: str) -> dict | None:
 
 # ---------------------------------------------------------------- stages
 
-def stage_songs(years: range, per_year: int) -> int:
+def stage_songs(years: range, per_year: int, playlists_per_year: int = 1) -> int:
     ROOT.mkdir(parents=True, exist_ok=True)
     path = ROOT / "songs.jsonl"
     seen = {json.loads(l)["id"] for l in path.read_text(encoding="utf-8").splitlines()} if path.exists() else set()
     n = 0
     with path.open("a", encoding="utf-8") as fh:
         for year in years:
-            pl = find_playlist(year)
-            if not pl:
+            pls = find_playlists(year, playlists_per_year)
+            if not pls:
                 print(f"{year}: no playlist")
                 continue
-            ents = playlist_entries(pl["id"], per_year)
-            print(f"{year}: {pl.get('title')} ({pl.get('channel') or pl.get('uploader')}) -> {len(ents)} videos", flush=True)
-            for e in ents:
-                if e["id"] in seen or (e["duration"] and not 120 <= e["duration"] <= 480):
-                    continue
-                seen.add(e["id"])
-                song, movie = clean_title(e["title"])
-                fh.write(json.dumps({**e, "year": year, "playlist": pl["id"], "song": song, "movie": movie}) + "\n")
-                n += 1
+            for pl in pls:
+                ents = playlist_entries(pl["id"], per_year)
+                print(f"{year}: {pl.get('title')} ({pl.get('channel') or pl.get('uploader')}) -> {len(ents)} videos", flush=True)
+                for e in ents:
+                    if e["id"] in seen or (e["duration"] and not 120 <= e["duration"] <= 480):
+                        continue
+                    seen.add(e["id"])
+                    song, movie = clean_title(e["title"])
+                    fh.write(json.dumps({**e, "year": year, "playlist": pl["id"], "song": song, "movie": movie}) + "\n")
+                    n += 1
     return n
 
 
@@ -398,10 +403,11 @@ def stage_cache_clean(out: str | Path = "data/cache_bolly2", bass_weight: float 
         mm = np.where(low, IGNORE, [to_majmin(c) for c in lab]).astype(np.int16)
         np.savez_compressed(out / f"bolly__{sid}.npz", feats=feats.astype(np.float16), labels=labels, root=root,
                             bass=bass, notes=notes, labels_mm=mm, labels_full=lab.astype(np.int16))
-    (ROOT / "align2.jsonl").write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+    diag = "align2.jsonl" if Path(out).name == "cache_bolly2" else f"align_{Path(out).name}.jsonl"
+    (ROOT / diag).write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
     return {"songs": len(recs), "kept": len(items), "threshold": float(thr)}
 
 
-def trusted_ids_v2() -> set[str]:
-    rows = [json.loads(l) for l in (ROOT / "align2.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+def trusted_ids_v2(diag: str = "align2.jsonl") -> set[str]:
+    rows = [json.loads(l) for l in (ROOT / diag).read_text(encoding="utf-8").splitlines() if l.strip()]
     return {r["id"] for r in rows if r["kept"]}

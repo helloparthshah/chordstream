@@ -74,7 +74,7 @@ def cmd_bollywood(a):
     from .data import bollywood as b
 
     if a.stage == "songs":
-        print(f"added {b.stage_songs(range(a.year_from, a.year_to + 1), a.per_year)} songs")
+        print(f"added {b.stage_songs(range(a.year_from, a.year_to + 1), a.per_year, a.playlists_per_year)} songs")
     elif a.stage == "sheets":
         print(b.stage_sheets())
     elif a.stage == "validate":
@@ -318,6 +318,7 @@ def main(argv=None):
     s.add_argument("--year-from", type=int, default=2010)
     s.add_argument("--year-to", type=int, default=2024)
     s.add_argument("--per-year", type=int, default=25)
+    s.add_argument("--playlists-per-year", type=int, default=1)
     s.add_argument("--cookies-from-browser", default="firefox")
     s.add_argument("--out", default="data/cache_bolly")
     s.set_defaults(fn=cmd_bollywood)

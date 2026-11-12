@@ -246,6 +246,16 @@ and a GPU recommended.
 - **Script:** this works in any script Whisper writes in. Romanized lyrics of non-English
   songs match poorly, because Whisper writes Hindi in Devanagari.
 
+## Gold labels for the Bollywood test songs
+
+`https://<host>:8000/annotate` opens a correction page for the Bollywood test songs (E21). It
+loads a song's audio and its sheet-aligned chords on a zoomable timeline; you play it (optionally
+slower, looping one segment), click a segment and press **1–9** for the sheet's chords (**0** =
+no chord, **X** = unsure, excluded from scoring), drag boundaries, **S**plit at the playhead or
+**M**erge, and **P** plays the selected chord so it can be compared by ear. Changes auto-save to
+`data/bollywood/gold/<id>.json`; **Mark song done** makes the Bollywood benchmark score that song
+against the hand-corrected labels instead of the aligned ones.
+
 ## Results
 
 The live model is **v7**, with an extended vocabulary (maj, min, 7, maj7, m7, dim, aug, sus2,

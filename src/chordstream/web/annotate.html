@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chordstream · gold labels</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --panel-2: #f0eee9; --fg: #1a1917; --muted: #77736b; --line: #e3e0d9;
+    --accent: #3b6cf6; --good: #16a34a; --warn: #d97706; --bad: #dc2626;
+    --shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d0e12; --panel: #15171d; --panel-2: #1c1f27; --fg: #eceef3; --muted: #8b90a0; --line: #262a35;
+      --accent: #6d8dff; --good: #34d399; --warn: #fbbf24; --bad: #f87171;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 32px rgba(0,0,0,.35);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; box-shadow: var(--shadow); }
+  h1 { font-size: 18px; margin: 0; } .muted { color: var(--muted); font-size: 13px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  select, button { font: inherit; border: 1px solid var(--line); border-radius: 9px; padding: 7px 11px; background: var(--panel-2); color: var(--fg); }
+  button { cursor: pointer; font-weight: 600; } button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; border-color: transparent; }
+  button.good { background: var(--good); color: #fff; border-color: transparent; }
+  button.on { outline: 2px solid var(--accent); }
+  canvas { width: 100%; display: block; border-radius: 10px; background: var(--panel-2); touch-action: none; }
+  #timeline { height: 120px; cursor: pointer; } #overview { height: 26px; margin-top: 8px; cursor: pointer; }
+  .chords { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chords button { min-width: 56px; }
+  .chords button kbd { font-size: 10px; color: var(--muted); margin-left: 4px; }
+  #sel { font-size: 28px; font-weight: 800; min-width: 90px; }
+  .help { columns: 2; font-size: 13px; color: var(--muted); } .help b { color: var(--fg); }
+  @media (max-width: 700px) { .help { columns: 1; } }
+  #status.saved { color: var(--good); } #status.dirty { color: var(--warn); }
+</style>
+</head>
+<body>
+<main>
+  <div class="card row" style="justify-content:space-between">
+    <div><h1>Gold chord labels</h1><div class="muted">Correct the sheet-aligned chords of Bollywood test songs while listening. Saved to <code>data/bollywood/gold/</code>.</div></div>
+    <div class="row"><select id="song"></select><span id="status" class="muted"></span></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div class="row">
+        <button id="play" class="primary">▶ Play</button>
+        <select id="rate"><option value="1">1×</option><option value="0.85">0.85×</option><option value="0.7">0.7×</option></select>
+        <button id="loop" title="Loop the selected segment (L)">⟲ Loop</button>
+        <button id="preview" title="Play the selected chord (P)">♪ Hear chord</button>
+        <span id="time" class="muted"></span>
+      </div>
+      <div class="row">
+        <button id="zoomout">−</button><span id="zoom" class="muted"></span><button id="zoomin">+</button>
+      </div>
+    </div>
+    <canvas id="timeline" style="margin-top:10px"></canvas>
+    <canvas id="overview"></canvas>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div id="sel">–</div>
+      <div class="muted" id="selinfo"></div>
+      <div style="flex:1"></div>
+      <button id="split" title="Split at the playhead (S)">✂ Split at playhead</button>
+      <button id="merge" title="Merge with the next segment (M)">⇥ Merge with next</button>
+      <button id="unsure" title="Mark as unsure: excluded from scoring (X)">? Unsure</button>
+    </div>
+    <div class="muted" style="margin:10px 0 6px">Chords in the sheet (keys 1–9), then N.C. (0):</div>
+    <div class="chords" id="sheetchords"></div>
+    <div class="row" style="margin-top:10px"><span class="muted">Other chord:</span><select id="allchords"></select></div>
+  </div>
+
+  <div class="card row" style="justify-content:space-between">
+    <div class="help">
+      <div><b>Space</b> play / pause · <b>← →</b> ±2 s · <b>Shift+← →</b> ±10 s</div>
+      <div><b>[ ]</b> previous / next segment · <b>click</b> a segment to select and seek</div>
+      <div><b>drag</b> a boundary to move it · <b>S</b> split · <b>M</b> merge · <b>X</b> unsure</div>
+      <div><b>1–9, 0</b> set chord · <b>P</b> hear chord · <b>L</b> loop · changes auto-save</div>
+    </div>
+    <button id="done" class="good">✓ Mark song done</button>
+  </div>
+  <audio id="audio" preload="auto"></audio>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const audio = $('audio');
+const st = { song: null, segs: [], sel: 0, view: 20, loop: false, dirty: false, drag: null, saveTimer: null };
+const PITCH = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11 };
+const IV = { maj: [0, 4, 7], min: [0, 3, 7], '7': [0, 4, 7, 10], maj7: [0, 4, 7, 11], min7: [0, 3, 7, 10], dim: [0, 3, 6], aug: [0, 4, 8], sus2: [0, 2, 7], sus4: [0, 5, 7] };
+const SUF = { maj: '', min: 'm', '7': '7', maj7: 'maj7', min7: 'm7', dim: 'dim', aug: 'aug', sus2: 'sus2', sus4: 'sus4' };
+const name = (l) => l === 'N' ? 'N.C.' : l === 'X' ? '?' : (([r, q]) => r + SUF[q])(l.split(':'));
+const hue = (l) => { if (l === 'N' || l === 'X') return null; const [r, q] = l.split(':'); return (PITCH[r] * 30 + (q.startsWith('min') ? 15 : 0)) % 360; };
+const fmt = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}.${Math.floor((t % 1) * 10)}`;
+
+async function loadList() {
+  const list = await (await fetch('/api/gold/songs')).json();
+  $('song').innerHTML = list.map((s) => `<option value="${s.id}">${s.status === 'done' ? '✓ ' : s.status ? '… ' : ''}${s.song}${s.movie ? ' · ' + s.movie : ''}</option>`).join('');
+  const last = (() => { try { return localStorage.getItem('gold.song'); } catch { return null; } })();
+  if (last && list.some((s) => s.id === last)) $('song').value = last;
+  if (list.length) await loadSong($('song').value);
+  else $('status').textContent = 'No test songs found (run chordstream bollywood clean).';
+}
+
+async function loadSong(id) {
+  if (st.dirty) await save();
+  try { localStorage.setItem('gold.song', id); } catch {}
+  const s = await (await fetch(`/api/gold/${id}`)).json();
+  st.song = s; st.segs = s.segments.map((x) => ({ ...x })); st.sel = 0; st.dirty = false;
+  audio.src = `/api/gold/${id}/audio`;
+  $('sheetchords').innerHTML = s.sheet_chords.map((c, i) => `<button data-l="${c.label}">${c.name}${i < 9 ? `<kbd>${i + 1}</kbd>` : ''}</button>`).join('')
+    + `<button data-l="N">N.C.<kbd>0</kbd></button>`;
+  $('allchords').innerHTML = '<option value="">choose…</option>' + s.all_chords.map((c) => `<option value="${c.label}">${c.name}</option>`).join('');
+  setStatus(s.status === 'done' ? 'done ✓' : s.status ? `in progress (saved ${s.saved})` : 'aligned labels (not yet reviewed)', s.status ? 'saved' : '');
+  render();
+}
+
+function setStatus(t, cls) { $('status').textContent = t; $('status').className = 'muted ' + (cls || ''); }
+function changed() {
+  st.dirty = true; setStatus('unsaved…', 'dirty'); render();
+  clearTimeout(st.saveTimer); st.saveTimer = setTimeout(save, 1500);
+}
+async function save(status) {
+  if (!st.song) return;
+  const body = { segments: st.segs, status: status || (st.song.status === 'done' && !st.dirty ? 'done' : 'in progress') };
+  const r = await fetch(`/api/gold/${st.song.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (r.ok) { st.dirty = false; st.song.status = body.status; const j = await r.json(); setStatus(`${body.status} · saved ${j.saved.slice(11)}`, 'saved'); }
+  else setStatus(`save failed: ${await r.text()}`, 'dirty');
+}
+
+const segAt = (t) => Math.max(0, st.segs.findIndex((s) => t >= s.start && t < s.end));
+function setLabel(l) { const s = st.segs[st.sel]; if (!s) return; s.label = l; mergeSame(); changed(); }
+function mergeSame() {
+  for (let i = st.segs.length - 1; i > 0; i--) if (st.segs[i].label === st.segs[i - 1].label) {
+    st.segs[i - 1].end = st.segs[i].end; st.segs.splice(i, 1); if (st.sel >= i) st.sel = Math.max(0, st.sel - 1);
+  }
+}
+function split() {
+  const t = audio.currentTime, i = segAt(t), s = st.segs[i];
+  if (!s || t - s.start < 0.1 || s.end - t < 0.1) return;
+  st.segs.splice(i + 1, 0, { start: +t.toFixed(3), end: s.end, label: s.label }); s.end = +t.toFixed(3); st.sel = i + 1; changed();
+}
+function merge() {
+  const i = st.sel; if (i >= st.segs.length - 1) return;
+  st.segs[i].end = st.segs[i + 1].end; st.segs.splice(i + 1, 1); changed();
+}
+
+// ---------------------------------------------------------------- drawing
+function fit(c) {
+  const dpr = devicePixelRatio || 1, r = c.getBoundingClientRect();
+  if (c.width !== Math.round(r.width * dpr) || c.height !== Math.round(r.height * dpr)) { c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr); }
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); return [g, r.width, r.height];
+}
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function viewStart() { const t = audio.currentTime || 0; return Math.max(0, t - st.view * 0.3); }
+function render() {
+  const dur = audio.duration || (st.segs.length ? st.segs[st.segs.length - 1].end : 1);
+  const [g, W, H] = fit($('timeline')), t0 = viewStart(), px = W / st.view;
+  g.clearRect(0, 0, W, H);
+  g.font = '600 14px system-ui';
+  st.segs.forEach((s, i) => {
+    if (s.end < t0 || s.start > t0 + st.view) return;
+    const x = (s.start - t0) * px, w = (s.end - s.start) * px, h = hue(s.label);
+    g.fillStyle = h == null ? css('--line') : `hsl(${h} 65% 55% / ${i === st.sel ? 0.55 : 0.28})`;
+    g.fillRect(x, 18, w - 1, H - 36);
+    if (i === st.sel) { g.strokeStyle = css('--accent'); g.lineWidth = 2; g.strokeRect(x + 1, 19, w - 3, H - 38); }
+    g.fillStyle = css('--fg');
+    if (w > 24) g.fillText(name(s.label), x + 6, H / 2 + 5);
+    g.fillStyle = css('--muted'); g.fillRect(x - 1, 10, 2, H - 20);  // boundary handle
+  });
+  g.fillStyle = css('--muted'); g.font = '11px system-ui';
+  for (let s = Math.ceil(t0); s < t0 + st.view; s++) if (s % (st.view > 30 ? 5 : 1) === 0) g.fillText(fmt(s).slice(0, -2), (s - t0) * px + 2, 11);
+  const ph = ((audio.currentTime || 0) - t0) * px;
+  g.fillStyle = css('--bad'); g.fillRect(ph - 1, 0, 2, H);
+  // overview
+  const [o, OW, OH] = fit($('overview'));
+  o.clearRect(0, 0, OW, OH);
+  st.segs.forEach((s) => { const h = hue(s.label); o.fillStyle = h == null ? css('--line') : `hsl(${h} 65% 55% / .6)`; o.fillRect(s.start / dur * OW, 0, Math.max(1, (s.end - s.start) / dur * OW), OH); });
+  o.strokeStyle = css('--accent'); o.lineWidth = 2; o.strokeRect(t0 / dur * OW, 1, st.view / dur * OW, OH - 2);
+  o.fillStyle = css('--bad'); o.fillRect((audio.currentTime || 0) / dur * OW - 1, 0, 2, OH);
+  const s = st.segs[st.sel];
+  $('sel').textContent = s ? name(s.label) : '–';
+  $('selinfo').textContent = s ? `${fmt(s.start)} – ${fmt(s.end)} (${(s.end - s.start).toFixed(2)} s) · segment ${st.sel + 1} / ${st.segs.length}` : '';
+  $('time').textContent = `${fmt(audio.currentTime || 0)} / ${fmt(dur)}`;
+  $('zoom').textContent = `${st.view} s`;
+  $('play').textContent = audio.paused ? '▶ Play' : '⏸ Pause';
+  $('loop').classList.toggle('on', st.loop);
+  document.querySelectorAll('#sheetchords button').forEach((b) => b.classList.toggle('on', s && b.dataset.l === s.label));
+}
+function tick() {
+  if (st.loop && !audio.paused) { const s = st.segs[st.sel]; if (s && audio.currentTime >= s.end) audio.currentTime = s.start; }
+  render(); requestAnimationFrame(tick);
+}
+
+// ---------------------------------------------------------------- pointer: select, seek, drag boundaries
+function timeAtX(e) { const r = $('timeline').getBoundingClientRect(); return viewStart() + (e.clientX - r.left) / r.width * st.view; }
+$('timeline').addEventListener('pointerdown', (e) => {
+  const t = timeAtX(e), tol = st.view / $('timeline').getBoundingClientRect().width * 8;
+  const b = st.segs.findIndex((s, i) => i > 0 && Math.abs(s.start - t) < tol);
+  if (b > 0) { st.drag = b; $('timeline').setPointerCapture(e.pointerId); return; }
+  st.sel = segAt(t); audio.currentTime = t; render();
+});
+$('timeline').addEventListener('pointermove', (e) => {
+  if (st.drag == null) return;
+  const i = st.drag, t = timeAtX(e), lo = st.segs[i - 1].start + 0.05, hi = st.segs[i].end - 0.05;
+  const v = +Math.min(hi, Math.max(lo, t)).toFixed(3); st.segs[i - 1].end = v; st.segs[i].start = v; render();
+});
+$('timeline').addEventListener('pointerup', () => { if (st.drag != null) { st.drag = null; changed(); } });
+$('overview').addEventListener('pointerdown', (e) => {
+  const r = $('overview').getBoundingClientRect(); audio.currentTime = (e.clientX - r.left) / r.width * (audio.duration || 1);
+  st.sel = segAt(audio.currentTime);
+});
+
+// ---------------------------------------------------------------- chord preview (simple triad)
+let ac;
+function preview() {
+  const s = st.segs[st.sel]; if (!s || s.label === 'N' || s.label === 'X') return;
+  ac = ac || new AudioContext();
+  const [r, q] = s.label.split(':'), now = ac.currentTime;
+  for (const iv of IV[q]) {
+    const o = ac.createOscillator(), gn = ac.createGain();
+    o.type = 'triangle'; o.frequency.value = 220 * 2 ** ((PITCH[r] + iv - 9) / 12) * (PITCH[r] + iv >= 12 ? 1 : 1);
+    gn.gain.setValueAtTime(0.0001, now); gn.gain.exponentialRampToValueAtTime(0.18, now + 0.02); gn.gain.exponentialRampToValueAtTime(0.0001, now + 1.4);
+    o.connect(gn).connect(ac.destination); o.start(now); o.stop(now + 1.5);
+  }
+}
+
+// ---------------------------------------------------------------- controls
+$('song').onchange = () => loadSong($('song').value);
+$('play').onclick = () => audio.paused ? audio.play() : audio.pause();
+$('rate').onchange = () => { audio.playbackRate = +$('rate').value; };
+$('loop').onclick = () => { st.loop = !st.loop; };
+$('preview').onclick = preview;
+$('split').onclick = split; $('merge').onclick = merge; $('unsure').onclick = () => setLabel('X');
+$('zoomin').onclick = () => { st.view = Math.max(5, st.view / 2); };
+$('zoomout').onclick = () => { st.view = Math.min(240, st.view * 2); };
+$('sheetchords').onclick = (e) => { const b = e.target.closest('button'); if (b) setLabel(b.dataset.l); };
+$('allchords').onchange = () => { if ($('allchords').value) setLabel($('allchords').value); $('allchords').value = ''; };
+$('done').onclick = () => save('done').then(loadList);
+audio.addEventListener('timeupdate', () => { if (!audio.paused && !st.loop) { const i = segAt(audio.currentTime); if (i !== st.sel && st.drag == null) st.sel = i; } });
+window.addEventListener('beforeunload', () => { if (st.dirty) navigator.sendBeacon?.(`/api/gold/${st.song.id}`, new Blob([JSON.stringify({ segments: st.segs, status: 'in progress' })], { type: 'application/json' })); });
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'SELECT') return;
+  const k = e.key;
+  if (k === ' ') { e.preventDefault(); audio.paused ? audio.play() : audio.pause(); }
+  else if (k === 'ArrowLeft' || k === 'ArrowRight') { e.preventDefault(); audio.currentTime += (k === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 2); st.sel = segAt(audio.currentTime); }
+  else if (k === '[') { st.sel = Math.max(0, st.sel - 1); audio.currentTime = st.segs[st.sel].start; }
+  else if (k === ']') { st.sel = Math.min(st.segs.length - 1, st.sel + 1); audio.currentTime = st.segs[st.sel].start; }
+  else if (k === 's' || k === 'S') split();
+  else if (k === 'm' || k === 'M') merge();
+  else if (k === 'x' || k === 'X') setLabel('X');
+  else if (k === 'p' || k === 'P') preview();
+  else if (k === 'l' || k === 'L') st.loop = !st.loop;
+  else if (k === '0') setLabel('N');
+  else if (/^[1-9]$/.test(k)) { const c = st.song?.sheet_chords[+k - 1]; if (c) setLabel(c.label); }
+});
+loadList(); requestAnimationFrame(tick);
+</script>
+</body>
+</html>

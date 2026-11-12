@@ -542,6 +542,8 @@ Dates are the day the experiment ran.
 |---|---|---|---|
 | E21 | Bollywood (above) | Does training on sheet-aligned Bollywood songs help on Bollywood without hurting Billboard? | Training running |
 | later | More Bollywood / Indian labelled data | Depends on E21 | **Survey (2026-11-12): no public time-aligned Bollywood chord dataset exists.** ChoCo's 18 sources are Western/Japanese pop, jazz, classical; Saraga (CompMusic) is Indian art music without chords; Chordonomicon (667k songs) is untimed UG scrapes without titles/artists (CC-BY-NC); Hooktheory/TheoryTab is time-aligned and human but has only a handful of Indian songs (e.g. *Kal Ho Naa Ho*, *Jai Ho*), gated, non-commercial. Best levers: scale the E21 pipeline (more years/playlists; ~37% of songs currently find a usable sheet), other human sheet sites (e.g. Acousterr; check terms), and a small hand-corrected gold test set |
+| E21 scale-up | More Bollywood songs ([`2026-11-12_bollywood_scale.ps1`](../experiments/2026-11-12_bollywood_scale.ps1)) | Does more sheet-aligned data help further? | 2000–2024, 3 playlists × 40 songs per year, full pipeline → `data/cache_bolly3`. Running. Other sheet sites: Acousterr's terms forbid automated access (§5), so not used; UG's terms allow personal, non-commercial access (§6.3), which this is (sheets stay local) |
+| E21 gold | Hand-corrected test labels (`/annotate` page, `chordstream.gold`) | How accurate are models on Bollywood with exact labels? | Built 2026-11-12; the benchmark uses a song's gold labels once marked done. Needs a person to annotate (~10–15 songs) |
 
 
 ## Model directory registry

@@ -23,7 +23,7 @@ from .nowplaying import now_playing
 from .stream import ChordStream
 from .vocab import CLASS_NAMES
 
-BUNDLE = os.environ.get("CHORDSTREAM_BUNDLE", "models/latest")
+BUNDLE = os.environ.get("CHORDSTREAM_BUNDLE", "models/v7")
 ONLY_CHANGES = os.environ.get("CHORDSTREAM_ONLY_CHANGES", "0") == "1"
 ASR_MODEL = os.environ.get("CHORDSTREAM_ASR", "off")  # e.g. "small"; "off" disables vocal alignment
 WEB_DIR = Path(__file__).parent / "web"
@@ -35,6 +35,10 @@ if ASR_MODEL != "off":
 
     ASR = VocalTranscriber(ASR_MODEL)
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+
+from .gold import router as gold_router  # noqa: E402  (E21 gold-label annotation)
+
+app.include_router(gold_router)
 
 
 @app.get("/health")
@@ -83,6 +87,11 @@ def index():
     for asset in sorted(WEB_DIR.glob("*.js")):
         html = html.replace(f"/static/{asset.name}\"", f"/static/{asset.name}?v={int(asset.stat().st_mtime)}\"")
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/annotate", response_class=HTMLResponse)
+def annotate():
+    return HTMLResponse((WEB_DIR / "annotate.html").read_text(encoding="utf-8"), headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/asr")
