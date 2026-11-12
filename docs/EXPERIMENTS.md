@@ -517,6 +517,7 @@ Dates are the day the experiment ran.
 | `e27_rare` | E27 | rare-chord mix (150 renders); not deployed |
 | `e27b_rare50` | E27b | rare-chord mix (50 renders); candidate |
 | `e21a_bolly`, `e21b_bolly_ft` | E21 | Bollywood mix (scratch / fine-tune); Billboard regression, not deployed |
+| `e21a_live` | E21 | `e21a_bolly` + HMM 5 s / power 2, exported; **on trial in the UI** (2026-11-12, user request); release stays `model-v7` |
 | `teacher` | E17 | offline teacher for majmin distillation |
 | `exp_a`, `exp_b`, `exp_w2/3/5`, `exp_g10`, `synth_g10`, `exp_lr3`, `exp_big`, `synth_big`, `v4_clean`, `v4_orig`, `student` | E08–E17 | experiment outputs; safe to delete |
 | `ext_teacher` | E18 | offline teacher for extended-vocabulary distillation |
