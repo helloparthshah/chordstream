@@ -15,6 +15,12 @@ documented, but new baselines are the non-distilled ones (`v4_clean`, E24).
 
 ## How results are measured
 
+**Selection rule (from 2026-11-12): overall accuracy across both test sets.** Live models are chosen
+by majmin accuracy over the 36 clean Billboard songs *and* the Bollywood test songs (E21): the mean
+of the two domains, with the per-song pooled number alongside. A Billboard drop is acceptable if the
+overall number rises. Bollywood accuracy is measured against sheet-aligned labels (noisy), so the
+aligner-independent "in sheet" metric must not fall either.
+
 All numbers come from `chordstream evaluate` (or the same functions in `chordstream.evaluate`).
 It is streaming-exact: posteriors from the exact chunked forward pass, then the causal HMM
 frame by frame, exactly as the live engine would run.
@@ -459,6 +465,9 @@ Dates are the day the experiment ran.
 - **E21c / E21d** ([`2026-11-12_bollywood_masked.ps1`](../experiments/2026-11-12_bollywood_masked.ps1)):
   Bollywood labels ignored within ±320 ms of every aligned chord change
   (`bollywood.mask_boundaries`), 3× / 1× weight. Running.
+- **Overall (selection rule above), majmin:** v7 83.3 / 55.8 → mean **69.6%** (pooled per song
+  73.8%); E21a 81.6 / 67.4 → **74.5%** (76.7%); E21b 81.1 / 65.2 → 73.2% (75.6%). E21a leads; final
+  choice after E21c/d.
 
 ### E27 · Rare chord types from synthetic renders · 2026-11-12 — `models/e27_rare`
 - **Script:** [`experiments/2026-11-12_rare_chords.ps1`](../experiments/2026-11-12_rare_chords.ps1)
