@@ -687,11 +687,47 @@ Dates are the day the experiment ran.
   (+1.7 pt) is measured on synthetic rooms like the training ones, so it is probably optimistic. Worth
   revisiting once there is real phone-in-a-room test audio.
 
-### E30 · Stability loss with label delay · 2026-11-12 — running
+### E30 · Stability loss with label delay · 2026-11-12 — `models/e30a_stab2`, `models/e30b_stab5`
 
 - **Script:** [`2026-11-12_stability_delay.ps1`](../experiments/2026-11-12_stability_delay.ps1).
-- **Setup:** v9's recipe and data, plus E22's stability loss at weights 2 and 5. E22 failed at zero
-  delay; with 120 ms of look-ahead, penalizing flips may now cut flicker inside the model.
+- **Setup:** v9's recipe and data, plus E22's stability loss at weights 2 and 5.
+- **Result** (HMM 5 s / power 2):
+
+  | | Billboard majmin (changes) | Bollywood v3 majmin (changes) | **overall** |
+  |---|---|---|---|
+  | v9 | **80.2%** (1.62×) | **80.0%** (1.25×) | **80.1%** |
+  | E30a (w 2) | **80.2%** (1.57×) | 79.5% (1.19×) | 79.9% |
+  | E30b (w 5) | 80.0% (1.51×) | 78.9% (1.12×) | 79.5% |
+
+- **Findings:** with look-ahead the loss trims chord changes by 3–7%, at a cost on Bollywood. That is far
+  less than the display-side evidence hold achieves (F05).
+- **Decision:** not deployed.
+
+### F07 · Bass dependence · 2026-11-12
+
+- **Script:** [`experiments/analysis_bass.py`](../experiments/analysis_bass.py). Prompted by the user:
+  "it struggles when there's less or no bass". Chords should come from the harmony, not the bass line.
+- **Result for v9** (majmin):
+
+  | | clean | bass removed < 150 Hz | < 300 Hz | quietest-bass 25% of frames | other frames | inverted chords | root position |
+  |---|---|---|---|---|---|---|---|
+  | Billboard 36 | 80.2% | 76.4% | 65.2% | 76.3% | 81.5% | **46.6%** (13 min) | 85.6% |
+  | Bollywood 61 | 80.0% | **66.8%** | **46.8%** | 75.5% | 81.3% | – | 81.4% |
+
+- **Findings:**
+  - The model leans heavily on the bass.
+  - On Bollywood, removing everything below 150 Hz costs 13 pt, and below 300 Hz costs 33 pt.
+  - Inverted chords are mostly named after their bass note.
+- **Next:** E31, bass dropout in training.
+
+### E31 · Bass dropout · 2026-11-12 — running
+
+- **Script:** [`2026-11-12_bass_dropout.ps1`](../experiments/2026-11-12_bass_dropout.ps1).
+- **Setup:** v9's recipe and data, plus `--bass-dropout 0.3 / 0.6`. That share of training crops has
+  everything below a random cutoff removed or attenuated to at most 30%, with a 2-semitone ramp. The
+  cutoff is 6–30 semitones above C2, i.e. 92–370 Hz.
+- The rest of the crops keep their bass, so the model sees every song both with and without bass.
+- Scored on the clean test sets and with F07's bass-removed audio.
 
 ### D01 · Key-aware chord spelling (display) · 2026-11-12
 - Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`
@@ -730,6 +766,7 @@ Dates are the day the experiment ran.
 | `e21c_bolly_mask3`, `e21d_bolly_mask1`, `e21e_bolly_clean`, `e21f_bolly_clean_rare` | E21 | Bollywood variants (e21e = v8) |
 | `e28a_bolly3x1`, `e28b_bolly3x2` (+ `_h5p2` eval copies) | E28 | scaled Bollywood mixes; e28b = v9 |
 | `e29_room` (+ `_h5p2`) | E29 | room-echo copies; not deployed |
+| `e30a_stab2`, `e30b_stab5` (+ `_h5p2`) | E30 | stability loss with delay; not deployed |
 | `teacher` | E17 | offline teacher for majmin distillation |
 | `exp_a`, `exp_b`, `exp_w2/3/5`, `exp_g10`, `synth_g10`, `exp_lr3`, `exp_big`, `synth_big`, `v4_clean`, `v4_orig`, `student` | E08–E17 | experiment outputs; safe to delete |
 | `ext_teacher` | E18 | offline teacher for extended-vocabulary distillation |

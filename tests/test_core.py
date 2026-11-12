@@ -433,3 +433,20 @@ def test_key_speller():
         sp.update(c)
     assert sp.key == 8 and sp.name(Db) == "Db" and sp.name(Ab) == "Ab"
     assert spelled_name(Gsm, None) == "Abm"  # before a key is known: canonical spelling
+
+
+def test_bass_dropout_removes_only_the_low_register(tmp_path):
+    """E31: with bass dropout on, the lowest bins are attenuated and the top bins are untouched
+    (apart from the shared loudness jitter, which scales every CQT bin equally)."""
+    from chordstream.data.dataset import CropDataset
+
+    T = 64
+    np.savez(tmp_path / "s.npz", feats=np.ones((T, 144), np.float16), labels=np.ones(T, np.int64))
+    ds = CropDataset([tmp_path / "s.npz"], 32, 2, augment=True, crops_per_epoch=50, bass_dropout=1.0)
+    for i in range(20):
+        x = ds[i][0]
+        scale = x[:, 140:].max()  # loudness jitter (frequency masking never zeroes all of the top bins here)
+        if scale == 0:
+            continue
+        assert x[:, :12].max() <= 0.3 * scale + 1e-6  # below F#2 always cut
+        assert np.allclose(x[:, 100:], scale) or (x[:, 100:] == 0).any()  # top untouched except masking

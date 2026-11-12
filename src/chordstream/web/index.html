@@ -579,6 +579,22 @@ async function startInner(source, label) {
   const node = new AudioWorkletNode(ctx, 'tap', {
     processorOptions: { inRate: ctx.sampleRate }, channelCount: 1, channelCountMode: 'explicit', channelInterpretation: 'speakers',
   });
+  // File playback goes through the <audio> element's normal output (like any website), so Android
+  // screen recorders can capture it; the engine and visualizer get a copy via captureStream().
+  // Routing the element through Web Audio (createMediaElementSource) sends the sound out on Chrome's
+  // low-latency path, which recorders cannot capture. Fallback when captureStream is missing: that.
+  const an = ctx.createAnalyser(); an.fftSize = file ? 8192 : 4096; an.smoothingTimeConstant = 0.6;
+  const wire = (from) => {
+    let tail = from;
+    if (file) {
+      for (let i = 0; i < 2; i++) {  // anti-alias before the worklet's downsampling
+        const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 7000; lp.Q.value = 0.7;
+        tail.connect(lp); tail = lp;
+      }
+    }
+    tail.connect(node);
+    from.connect(an);
+  };
   if (file) {
     player = document.createElement('audio');
     player.controls = true;
@@ -586,19 +602,30 @@ async function startInner(source, label) {
     fileUrl = URL.createObjectURL(file);
     player.src = fileUrl;
     $('playerrow').replaceChildren(player);
-    src = ctx.createMediaElementSource(player);
-    src.connect(ctx.destination);  // you hear the file as normal
-    let tail = src;
-    for (let i = 0; i < 2; i++) {  // anti-alias before the worklet's downsampling
-      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 7000; lp.Q.value = 0.7;
-      tail.connect(lp); tail = lp;
+    const cap = player.captureStream;  // not mozCaptureStream: Firefox mutes the element while captured
+    if (cap) {
+      const ms = cap.call(player);
+      let tapped = null;  // the stream's audio track appears once playback starts (and may be replaced)
+      const tap = () => {
+        const t = ms.getAudioTracks()[0];
+        if (!t || t === tapped) return;
+        tapped = t;
+        try { src?.disconnect(); } catch {}
+        src = ctx.createMediaStreamSource(new MediaStream([t]));
+        wire(src);
+      };
+      ms.addEventListener('addtrack', tap);
+      player.addEventListener('playing', tap);
+    } else {
+      src = ctx.createMediaElementSource(player);
+      src.connect(ctx.destination);  // you hear the file through Web Audio
+      wire(src);
     }
-    tail.connect(node);
     window.sheet?.setLocal?.({ name: file.name, time: () => player.currentTime, playing: () => !player.paused,
                              duration: () => player.duration });
   } else {
     src = ctx.createMediaStreamSource(new MediaStream(audio));
-    src.connect(node);
+    wire(src);
   }
   node.port.onmessage = (m) => {
     if (ws.readyState !== 1) return;
@@ -606,8 +633,6 @@ async function startInner(source, label) {
     sentAt.push(performance.now());
     if (sentAt.length > 50) sentAt.shift();
   };
-  const an = ctx.createAnalyser(); an.fftSize = file ? 8192 : 4096; an.smoothingTimeConstant = 0.6;
-  src.connect(an);
 
   let raf, drawErr = false;
   const loop = () => {

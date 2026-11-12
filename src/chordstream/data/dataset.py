@@ -157,7 +157,7 @@ class CropDataset:
     """
 
     def __init__(self, files, crop: int, bins_per_semitone: int, augment: bool, crops_per_epoch: int, seed: int = 0,
-                 n_classes: int = N_CLASSES):
+                 n_classes: int = N_CLASSES, bass_dropout: float = 0.0):
         self.songs = []
         self.n_classes = n_classes
         for f in files:
@@ -176,6 +176,7 @@ class CropDataset:
         self.weights = lengths / lengths.sum()  # sample proportional to duration
         self.crop, self.bps, self.augment, self.n = crop, bins_per_semitone, augment, crops_per_epoch
         self.seed = seed
+        self.bass_dropout = bass_dropout  # E31: share of crops with the low register removed
 
     def __len__(self) -> int:
         return self.n
@@ -216,6 +217,14 @@ class CropDataset:
                     aux[v, col] = (aux[v, col] + k) % 12
                 aux[:, 2] = rotate_mask(aux[:, 2], k)
             x[:, :144] *= rng.uniform(0.8, 1.2)  # loudness jitter in log domain (CQT bins only)
+            if self.bass_dropout and rng.random() < self.bass_dropout:
+                # E31 bass dropout: remove (or strongly attenuate) everything below a random cutoff,
+                # 6-30 semitones above C2 (F#2 ~92 Hz .. F#4 ~370 Hz), with a 2-semitone ramp, so the
+                # chord must be read from the upper harmony rather than the bass line.
+                cut = int(rng.integers(6, 31)) * self.bps
+                ramp = np.clip((np.arange(144) - (cut - 2 * self.bps)) / (2 * self.bps), 0, 1)
+                floor = rng.uniform(0.0, 0.3)
+                x[:, :144] *= (floor + (1 - floor) * ramp).astype(np.float32)
             if rng.random() < 0.5:  # frequency masking
                 f0 = int(rng.integers(0, 144 - 12))
                 x[:, f0 : f0 + int(rng.integers(1, 12))] = 0
