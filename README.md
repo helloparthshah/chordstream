@@ -108,7 +108,8 @@ Every experiment behind these choices is in [docs/EXPERIMENTS.md](docs/EXPERIMEN
 | Streaming cost | ONNX runs one step per frame: the CNN sees its 13-frame receptive field, and each layer keeps a 127-entry KV cache. A test checks this matches the full forward pass exactly. |
 | Smoothing | HMM **forward filtering** only, never Viterbi backtracking, so smoothing adds no latency. Transitions = self-loop (mean chord 5 s) plus a chord-change prior; emissions sharpened with power 2. |
 | Look-ahead | **Label delay**: training targets are shifted 3 frames, so output t names the chord at t − 3 and every decision hears 120 ms past its frame. Worth +1.2–2.5 pts and fewer flips vs giving the same delay to the decoder (E23, E25). |
-| Chord sheet | The sheet only takes a chord once the live chord has held 480 ms, then backdates it to where it began: about the reference number of chord changes (1.03×) and 83.4% majmin (F03). The live readout still shows every decision. |
+| Chord sheet | The sheet only takes a chord once the live chord has held 480 ms, then backdates it to where it began: about the reference number of chord changes (1.03×) and 83.4% majmin (F03). |
+| Steady display | By default the big chord uses an *evidence hold*: it switches at once when the network has given up on the shown chord, but waits up to 20 frames (800 ms) while the old chord still has ≥ 5% probability. That removes ~70% of blips (6.3 → 1.8/min, 46 → 35 changes/min) for 0.6 pt majmin on Billboard; a plain 480 ms hold would cost 14 pt at display time. The live per-frame guess shows small underneath ("hearing D…"), like a provisional caption. Tick **Instant** to show every decision (F04/F05). |
 | Spelling | A decaying (~30 s) histogram of the chords' notes picks the best-fitting key signature (with hysteresis); names use its sharps or flats. Display only. |
 | Vocabulary | 109 classes: 12 roots × 9 qualities + N; the first 25 are the classic major/minor set. Richer chords fold into the nearest quality (Cadd9→C, C9→C7, hdim7→dim). Power chords have no class but still train the root/bass/notes heads. |
 | UG "grammar" | Supplies (1) the HMM's chord-change matrix, counted in all 12 keys, and (2) progressions for the synthetic-audio renderer. |
@@ -230,7 +231,7 @@ docker run -p 8000:8000 chordstream
   (`/api/lyrics`), cached in `data/lyrics_cache/`.
 - **Placement:** the engine commits a chord to the sheet once it has held 480 ms, backdated to
   where it began, and the page places it above the word being sung at that moment, Ultimate
-  Guitar-style. Short blips show on the live readout but never reach the sheet. Placement within a line is by timing, so it's
+  Guitar-style. Short blips appear only in the small "hearing …" line (or the big chord in Instant mode), never on the sheet. Placement within a line is by timing, so it's
   approximate. Chords outside lyric lines go into Intro or Instrumental rows.
 - **Sync controls:** **±** shifts the lyrics against the music, and clicking a lyric line
   as it is sung re-syncs everything. If the player doesn't report a position, clicking a
@@ -316,6 +317,7 @@ Each completed 40 ms frame returns one JSON event:
 | `delay` | the model's label delay in seconds (0.12 for v7) |
 | `key` | estimated key signature, e.g. `"E / C#m"`, once known |
 | `beat`, `bpm`, `beat_conf` | causal beat tracker (display only) |
+| `display_label`, `display_name` | the steady-display chord (evidence hold, F05), shown big unless Instant is ticked |
 | `beat_label`, `beat_name`, `beat_t0` | set when a chord is committed to the sheet: the chord and its start time (described time) |
 Send the text `reset` between songs. Set `CHORDSTREAM_ONLY_CHANGES=1` to receive only chord changes.
 

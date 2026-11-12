@@ -45,6 +45,12 @@ class ChordEvent:
     beat_t0: float | None = None
     delay: float = 0.0  # the chord fields describe the audio at time - delay (label-delay models)
     key: str | None = None  # estimated key signature (major tonic), used for spelling names
+    # Steady display (F05 "evidence hold"): the chord for the big readout. It leaves the shown chord
+    # A for the live chord B at once, unless the network still gives A probability >= display_thr,
+    # in which case B must hold display_hold frames first. With v9 (20 frames, 0.05) on Billboard:
+    # 79.6% vs 80.2% majmin for the live chord, 35 vs 46 changes/min, 1.8 vs 6.3 blips/min.
+    display_label: str = ""
+    display_name: str = ""
 
     def as_dict(self) -> dict:
         return self.__dict__.copy()
@@ -52,8 +58,9 @@ class ChordEvent:
 
 class ChordStream:
     def __init__(self, bundle_dir: str | Path, threads: int = 2, smoothing: bool = True,
-                 sheet_min_frames: int = 12):
+                 sheet_min_frames: int = 12, display_hold: int = 20, display_thr: float = 0.05):
         self.sheet_min_frames = sheet_min_frames
+        self.display_hold, self.display_thr = display_hold, display_thr
         import onnxruntime as ort
 
         bundle_dir = Path(bundle_dir)
@@ -84,6 +91,7 @@ class ChordStream:
         self.run_len = 0  # frames the live chord has held
         self.run_t0 = 0.0  # start of the current run, in described time
         self.committed = -1  # last chord written to the sheet
+        self.shown = -1  # chord in the steady display
         self.speller = KeySpeller(fps=1.0 / self.cfg.frontend.frame_seconds)
         self.compute_ms: list[float] = []
         if self.hmm:
@@ -120,6 +128,10 @@ class ChordStream:
             if changed:
                 self.run_len, self.run_t0 = 0, now - delay - fs
             self.run_len += 1
+            if self.shown < 0 or (idx != self.shown and (probs[self.shown] < self.display_thr
+                                                         or self.run_len >= self.display_hold)):
+                self.shown = idx
+            ev.display_label, ev.display_name = CLASS_NAMES[self.shown], self.speller.name(self.shown)
             if self.run_len >= self.sheet_min_frames and idx != self.committed:
                 self.committed = idx
                 ev.beat_label, ev.beat_name, ev.beat_t0 = CLASS_NAMES[idx], self.speller.name(idx), round(self.run_t0, 3)

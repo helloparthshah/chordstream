@@ -610,6 +610,64 @@ Dates are the day the experiment ran.
 - **UI:** the big readout shows every decision and plays a pop animation on each change, so every
   blip is visible. Browser echo cancellation, noise suppression and auto-gain are already off.
 
+### F05 · Display-side flicker fixes (no retraining) · 2026-11-12
+
+- **Scripts:** [`experiments/analysis_flicker_fixes.py`](../experiments/analysis_flicker_fixes.py) and
+  [`analysis_evidence_grid.py`](../experiments/analysis_evidence_grid.py). Model v9. Each display is
+  scored *at display time*, so any waiting counts as lag.
+- **Displays tested:**
+  - **steady k:** switch once the live chord has held k frames. This is the sheet rule without
+    backdating.
+  - **evidence hold k / t:** leave the shown chord A for B at once, unless the network still gives A
+    at least t probability; then B must hold k frames first.
+  - **Pitch-shift averaging:** average the posteriors from inputs shifted ±1 and ±2 semitones, before
+    the HMM.
+
+  | Billboard 36 (Bollywood 61 majmin) | majmin | changes/min (ref 26.3) | blips/min | segments < 0.5 s |
+  |---|---|---|---|---|
+  | live HMM path (Instant) | 80.2% (80.0%) | 46.4 | 6.3 | 33% |
+  | steady 6 (240 ms) | 74.3% (70.3%) | 38.0 | 3.1 | 19% |
+  | steady 12 (480 ms) | 66.5% (61.4%) | 28.7 | 0.2 | 2% |
+  | **evidence hold 20 / 0.05** | **79.6%** (77.0%) | **35.1** | **1.8** | 20% |
+  | evidence hold 20 / 0.02 | 77.0% (72.9%) | 29.1 | 0.8 | 12% |
+  | evidence hold 12 / 0.05 | 79.7% (77.1%) | 36.9 | 2.2 | 21% |
+  | pitch-shift avg ±2, live | 80.3% (80.4%) | 45.9 | 5.9 | 32% |
+
+- **Findings:**
+  - The evidence hold dominates plain holds. At the same flicker as steady 12, it is 10.5 pt more
+    accurate at display time.
+  - At 20 / 0.05 it removes about 70% of blips for 0.6 pt on Billboard.
+  - Bollywood loses more (−3 pt), partly because its aligned reference is itself choppy (F04).
+  - Pitch-shift averaging does almost nothing: the blips are consistent across shifts, which is the
+    confident-error pattern seen in F01 again.
+- **Decision:**
+  - The engine emits `display_label` / `display_name` (evidence hold 20 / 0.05). The web page shows it
+    big by default ("Steady"), with the live chord small underneath ("hearing D…"); the **Instant**
+    checkbox restores per-frame display.
+  - Streaming check on Billboard 0010 (60 s): the engine display agrees with the offline rule on 97%
+    of frames, and changes drop from 65 to 49.
+  - An earlier version of the Steady display used the 480 ms sheet rule, and was replaced the same day
+    after this table.
+  - Pitch-shift averaging is rejected.
+
+### F06 · Does live-like audio flicker more? · 2026-11-12
+
+- **Script:** [`experiments/analysis_degraded.py`](../experiments/analysis_degraded.py). The 36
+  Billboard test songs are re-rendered and given a fresh causal CQT, then scored with v9:
+
+  | audio | majmin | full | changes/min | blips/min |
+  |---|---|---|---|---|
+  | clean | 80.2% | 67.7% | 46.4 | 6.3 |
+  | room echo (synthetic RIR, RT60 0.5 s) | **75.4%** | 63.5% | 47.8 | 6.4 |
+  | phone-mic band 150 Hz–6 kHz + soft clip | 80.4% | 68.1% | 45.4 | 5.9 |
+  | pink noise, 15 dB SNR | 79.7% | 67.0% | 46.6 | 6.2 |
+  | all three | 75.0% | 63.2% | 47.0 | 6.4 |
+
+- **Findings:**
+  - Flicker is a property of the model, not the room: it hardly changes under any degradation.
+  - Room echo, however, costs **4.8 pt** of accuracy. The phone-mic band and noise are harmless.
+- **Next:** E29 trains with room-echo copies of the training songs.
+
 ### D01 · Key-aware chord spelling (display) · 2026-11-12
 - Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`
   keeps a ~30 s decaying histogram of the chords' notes, picks the best-fitting major-scale key

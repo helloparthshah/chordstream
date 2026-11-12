@@ -56,6 +56,10 @@
   #chord.flash { animation: pop .25s ease-out; }
   @keyframes pop { from { transform: scale(.94); opacity: .4; } to { transform: scale(1); opacity: 1; } }
   #quality { color: var(--muted); font-size: 16px; min-height: 24px; }
+  #live { color: var(--muted); font-size: 14px; min-height: 20px; margin-top: 6px; opacity: .75; font-variant-numeric: tabular-nums; }
+  #live b { font-weight: 600; color: var(--fg); opacity: .8; }
+  .chordhead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .modetoggle { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
   .confrow { display: flex; align-items: center; gap: 12px; margin-top: 20px; }
   .bar { flex: 1; height: 6px; border-radius: 99px; background: var(--panel-2); overflow: hidden; }
   .bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .12s; }
@@ -158,11 +162,13 @@
 
   <section class="stage">
     <div class="card chordbox">
-      <div class="label">Current chord</div>
+      <div class="chordhead"><span class="label">Current chord</span>
+        <label class="modetoggle" title="Steady: the big chord waits up to 0.8 s before leaving a chord that still sounds plausible, which hides most short blips; the live guess is shown small below. Instant: every 40 ms decision."><input type="checkbox" id="instant"> Instant</label></div>
       <div class="chordmain">
         <div>
           <div id="chord" class="idle">—</div>
           <div id="quality">Waiting for audio</div>
+          <div id="live"></div>
         </div>
         <div id="diagram" aria-live="polite"></div>
       </div>
@@ -254,7 +260,8 @@ const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v
 let session = null, lastName = null, chordTones = new Set(), rootPc = -1, spelled = {};
 // The progression strip, chord sheet and diagram follow the server's per-beat chords
 // (posteriors averaged over each beat, reported when the beat ends): one beat late, but
-// more accurate and far less flickery than per-frame decisions. The big display stays instant.
+// more accurate and far less flickery than per-frame decisions. The big display follows them too
+// unless "Instant" is ticked.
 
 // Spell triad tones by letter (E major -> E G♯ B, not E A♭ B).
 const LETTERS = 'CDEFGAB', NAT = [0, 2, 4, 5, 7, 9, 11];
@@ -287,11 +294,24 @@ function setButtons(enabled) { $('mic').disabled = $('sys').disabled = !enabled;
 // ---------------------------------------------------------------- chord display
 const fmtTime = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
 
-function showChord(e) {
+// Steady mode (default, F05): the big chord is the server's evidence-hold chord (display_*): it only
+// waits before leaving a chord the network still finds plausible, which removes ~70% of blips for
+// ~0.6 pt accuracy; the live per-frame guess is shown small underneath, like a provisional caption.
+// Instant mode shows every decision in the big display.
+let instant = false;
+try { instant = localStorage.getItem('instant') === '1'; } catch { /* storage unavailable */ }
+$('instant').checked = instant;
+$('instant').addEventListener('change', (ev) => {
+  instant = ev.target.checked;
+  try { localStorage.setItem('instant', instant ? '1' : '0'); } catch { /* storage unavailable */ }
+});
+let committed = null;  // steady chord {name, label}
+
+function renderBig(name, label) {
   const el = $('chord');
   el.classList.remove('idle');
-  if (e.name !== el.textContent) { el.textContent = e.name; el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
-  const [root, q] = e.label.split(':');
+  if (name !== el.textContent) { el.textContent = name; el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+  const [root, q] = label.split(':');
   chordTones = new Set(); rootPc = -1;
   if (root in PC) {
     rootPc = PC[root];
@@ -303,10 +323,21 @@ function showChord(e) {
     spelled = {};
     $('quality').textContent = 'No chord';
   }
+}
+
+function showChord(e) {
+  if (e.beat_label && e.beat_name !== lastName) commitBeatChord(e);
+  if (e.display_label) committed = { name: e.display_name, label: e.display_label };
+  else if (e.beat_label) committed = { name: e.beat_name, label: e.beat_label };  // older servers
+  if (instant || !committed) renderBig(e.name, e.label);
+  else renderBig(committed.name, committed.label);
+  const live = $('live');
+  if (!instant && committed && e.name !== committed.name) {
+    live.replaceChildren('hearing ', Object.assign(document.createElement('b'), { textContent: e.name }), '…');
+  } else live.textContent = '';
   const pct = Math.round(e.confidence * 100);
   $('confbar').style.width = `${pct}%`;
   $('confpct').textContent = `${pct}%`;
-  if (e.beat_label && e.beat_name !== lastName) commitBeatChord(e);
 }
 
 function commitBeatChord(e) {
@@ -600,7 +631,7 @@ async function startInner(source, label) {
     setButtons(true);
     $('sig').textContent = 'No input'; $('sig').className = 'none';
     $('lvl').style.clipPath = 'inset(0 100% 0 0)'; $('fps').textContent = ''; $('lat').textContent = '';
-    setStatus(msg, kind); session = null; lastName = null;
+    setStatus(msg, kind); session = null; lastName = null; committed = null; $("live").textContent = "";
     chromaSmooth.fill(0); drawFrame(null, 16000);
     Object.assign(beatState, { beats: [], segs: [], lastT: 0 }); drawTimeline();
     $('bpm').textContent = '–'; $('key').textContent = ''; $('beatrow').classList.remove('locked');

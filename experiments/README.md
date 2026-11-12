@@ -33,6 +33,8 @@ They assume the synthetic init `models/latest` and the caches built by the CLI:
 | `analysis_sheet_align.py`, `analysis_sheet_align_grid.py` | E21 | accuracy of sheet-to-audio alignment on Billboard |
 | `analysis_bollywood.py` | E21 | Bollywood test songs: time in sheet, sequence coverage, changes, aligned accuracy (`--v3`: the 61 scaled test songs) |
 | `analysis_flicker.py` | F04 | live-readout flicker: changes/min, short segments, A→B→A blips and their chord pairs |
+| `analysis_flicker_fixes.py`, `analysis_evidence_grid.py` | F05 | display rules (steady / evidence hold) and pitch-shift averaging, scored at display time |
+| `analysis_degraded.py` | F06 | Billboard test songs with room echo / phone band / noise: accuracy and flicker |
 | `hmm55.py` | E28 | copy a model to `<dir>_h5p2` with the deployed HMM (5 s / power 2) for evaluation |
 | `analysis_per_type.py` | E18, E27 | per-chord-type recall with a common HMM |
 | `analysis_label_cleaning.py` | E21 | aligner variants on Billboard: bass evidence, beat snapping, confidence mask |
