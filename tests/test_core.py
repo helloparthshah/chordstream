@@ -450,3 +450,15 @@ def test_bass_dropout_removes_only_the_low_register(tmp_path):
             continue
         assert x[:, :12].max() <= 0.3 * scale + 1e-6  # below F#2 always cut
         assert np.allclose(x[:, 100:], scale) or (x[:, 100:] == 0).any()  # top untouched except masking
+
+
+def test_random_eq_gain_is_exact_on_log_features():
+    """E32: a gain applied to log1p-compressed features equals compressing the gained magnitude."""
+    from chordstream.data.dataset import apply_gain_db, random_eq_db
+
+    rng = np.random.default_rng(0)
+    mag = rng.uniform(0, 5, (10, 144)).astype(np.float32)
+    g = random_eq_db(rng)
+    assert g.shape == (144,) and np.isfinite(g).all()
+    want = np.log1p(mag * 10 ** (g / 20)).astype(np.float32)
+    assert np.allclose(apply_gain_db(np.log1p(mag), g), want, atol=1e-4)

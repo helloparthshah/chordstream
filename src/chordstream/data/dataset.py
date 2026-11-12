@@ -157,7 +157,7 @@ class CropDataset:
     """
 
     def __init__(self, files, crop: int, bins_per_semitone: int, augment: bool, crops_per_epoch: int, seed: int = 0,
-                 n_classes: int = N_CLASSES, bass_dropout: float = 0.0):
+                 n_classes: int = N_CLASSES, bass_dropout: float = 0.0, random_eq: float = 0.0):
         self.songs = []
         self.n_classes = n_classes
         for f in files:
@@ -177,6 +177,7 @@ class CropDataset:
         self.crop, self.bps, self.augment, self.n = crop, bins_per_semitone, augment, crops_per_epoch
         self.seed = seed
         self.bass_dropout = bass_dropout  # E31: share of crops with the low register removed
+        self.random_eq = random_eq  # E32: share of crops passed through a random EQ curve
 
     def __len__(self) -> int:
         return self.n
@@ -225,10 +226,38 @@ class CropDataset:
                 ramp = np.clip((np.arange(144) - (cut - 2 * self.bps)) / (2 * self.bps), 0, 1)
                 floor = rng.uniform(0.0, 0.3)
                 x[:, :144] *= (floor + (1 - floor) * ramp).astype(np.float32)
+            if self.random_eq and rng.random() < self.random_eq:
+                x[:, :144] = apply_gain_db(x[:, :144], random_eq_db(rng, self.bps))
             if rng.random() < 0.5:  # frequency masking
                 f0 = int(rng.integers(0, 144 - 12))
                 x[:, f0 : f0 + int(rng.integers(1, 12))] = 0
         return x, y, q, aux
+
+
+def random_eq_db(rng, bps: int = 2, n_bins: int = 144) -> np.ndarray:
+    """E32: a random EQ curve over the CQT bins (C2..B7), in dB: low shelf (cut up to 40 dB or
+    boost 6 dB, corner 70-400 Hz), high shelf (-24..+6 dB, corner 1-3.5 kHz), a spectral tilt of
+    +-6 dB, and 0-3 peaking/notch bands (-15..+10 dB, 1-12 semitones wide). Covers thin phone
+    speakers, missing or boomy bass, muffled rooms and resonances."""
+    st = np.arange(n_bins) / bps  # semitones above C2 (65.4 Hz)
+    hz2st = lambda f: 12 * np.log2(f / 65.41)  # noqa: E731
+    sig = lambda z: 1 / (1 + np.exp(-z))  # noqa: E731
+    g = np.zeros(n_bins)
+    if rng.random() < 0.7:
+        lo = rng.uniform(-40, 6) if rng.random() < 0.85 else rng.uniform(0, 6)
+        g += lo * (1 - sig((st - hz2st(rng.uniform(70, 400))) / rng.uniform(0.7, 3)))
+    if rng.random() < 0.5:
+        g += rng.uniform(-24, 6) * sig((st - hz2st(rng.uniform(1000, 3500))) / rng.uniform(0.7, 3))
+    g += rng.uniform(-6, 6) * (st / st[-1] - 0.5)
+    for _ in range(int(rng.integers(0, 4))):
+        g += rng.uniform(-15, 10) * np.exp(-0.5 * ((st - rng.uniform(0, st[-1])) / rng.uniform(0.5, 6)) ** 2)
+    return g
+
+
+def apply_gain_db(x: np.ndarray, gain_db: np.ndarray) -> np.ndarray:
+    """Exact magnitude gain on log-compressed CQT features (x = log1p(log_scale * |X|))."""
+    gl = (10.0 ** (gain_db / 20.0)).astype(np.float32)
+    return np.log1p(np.expm1(x) * gl).astype(np.float32)
 
 
 def shift_bins(x: np.ndarray, n: int) -> np.ndarray:

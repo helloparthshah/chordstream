@@ -99,7 +99,7 @@ def cmd_train(a):
                        label_delay=a.label_delay, sheet_delay=a.sheet_delay)
     train(a.cache, a.out, a.epochs, a.batch_size, a.lr, a.crops, a.init, a.progressions, a.holdout_prefix,
           a.workers, a.device, mcfg, a.transition_weight, a.transition_window, a.seed, FrontendConfig(gamma=a.gamma),
-          a.eval_every, a.bidirectional, a.distill_weight, a.aux_weight, a.stability_weight, a.bass_dropout)
+          a.eval_every, a.bidirectional, a.distill_weight, a.aux_weight, a.stability_weight, a.bass_dropout, a.random_eq)
 
 
 def cmd_export(a):
@@ -353,6 +353,8 @@ def main(argv=None):
                    help="E22: penalise frame-to-frame prediction change where the chord is constant")
     s.add_argument("--bass-dropout", type=float, default=0.0,
                    help="E31: share of training crops with the low register (below a random 92-370 Hz cutoff) removed")
+    s.add_argument("--random-eq", type=float, default=0.0,
+                   help="E32: share of training crops passed through a random EQ curve (shelves, tilt, peaks/notches)")
     s.add_argument("--sheet-delay", type=int, default=0,
                    help="E26: add a chord-sheet head trained with this (longer) label delay")
     s.add_argument("--label-delay", type=int, default=0,

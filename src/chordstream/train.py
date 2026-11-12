@@ -195,6 +195,7 @@ def train(
     aux_weight: float = 0.5,
     stability_weight: float = 0.0,
     bass_dropout: float = 0.0,
+    random_eq: float = 0.0,
 ) -> Path:
     if seed is not None:
         torch.manual_seed(seed)
@@ -222,7 +223,7 @@ def train(
     train_files, val_files = split_files(cache, holdout_prefix=holdout_prefix)
     print(f"train songs: {len(train_files)}  val songs: {len(val_files)}  device: {dev}")
     ds = CropDataset(train_files, crop, fcfg.bins_per_semitone, augment=True, crops_per_epoch=crops_per_epoch,
-                     n_classes=mcfg.n_classes, bass_dropout=bass_dropout)
+                     n_classes=mcfg.n_classes, bass_dropout=bass_dropout, random_eq=random_eq)
     dl = DataLoader(ds, batch_size=batch_size, shuffle=True, num_workers=workers, collate_fn=_collate,
                     drop_last=True, persistent_workers=workers > 0)
 
