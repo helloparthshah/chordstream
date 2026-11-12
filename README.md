@@ -1,7 +1,7 @@
 # chordstream
 
 Real-time chord recognition from live audio. Each 40 ms of audio produces one decision, computed
-only from audio already heard. The live model (v8) names the chord of the audio 120 ms ago: that
+only from audio already heard. The live model (v9) names the chord of the audio 120 ms ago: that
 short, trained-in delay lets each decision hear a little of what follows, which removes much of
 the flicker at chord changes. It names 108 chords (12 roots × maj, min, 7, maj7, m7, dim, aug,
 sus2, sus4) plus "no chord", and is trained on human-labelled data only: US Billboard hits plus
@@ -119,8 +119,8 @@ Every experiment behind these choices is in [docs/EXPERIMENTS.md](docs/EXPERIMEN
 Trained bundles are attached to GitHub Releases, so they don't bloat git history:
 
 ```powershell
-gh release download model-v8 --pattern "*.zip" --dir models
-Expand-Archive models/chordstream-v8.zip models; uv run chordstream serve --bundle models/v8
+gh release download model-v9 --pattern "*.zip" --dir models
+Expand-Archive models/chordstream-v9.zip models; uv run chordstream serve --bundle models/v9
 ```
 
 They were trained on copyrighted recordings, so keep them for personal use.
@@ -154,16 +154,18 @@ uv run chordstream clean                        # -> data/cache_bb_fix (367 song
 uv run chordstream build-ext                    # -> data/cache_ext
 
 # 6. Bollywood labels (E21; see below), then the mixed training folder
-#    powershell -File experiments/2026-11-12_bollywood_clean.ps1 builds data/cache_ext_bolly2 and trains E21e (= v8)
+#    powershell -File experiments/2026-11-12_bollywood_scale.ps1 collects songs -> data/cache_bolly3;
+#    experiments/2026-11-12_bollywood_scaled_train.ps1 builds data/cache_ext_bolly3x2 and trains E28b (= v9)
 
-# 7. Train the live recipe (v8 = E21e), evaluate, export
-uv run chordstream train --init models/latest --cache data/cache_ext_bolly2 --vocab extended --label-delay 3 `
-    --lr 3e-4 --epochs 80 --crops 2000 --transition-weight 3 --out models/v8
-uv run chordstream evaluate models/v8 --cache data/cache_ext
-uv run python experiments/analysis_bollywood.py models/v8   # Bollywood test songs
-uv run chordstream export models/v8             # ONNX + parity check (HMM 5 s / power 2: see EXPERIMENTS E25)
+# 7. Train the live recipe (v9 = E28b), evaluate, export
+uv run chordstream train --init models/latest --cache data/cache_ext_bolly3x2 --vocab extended --label-delay 3 `
+    --lr 3e-4 --epochs 80 --crops 2000 --transition-weight 3 --out models/v9
+uv run python experiments/hmm55.py models/v9    # deployed HMM (5 s / power 2, see EXPERIMENTS E25) -> models/v9_h5p2
+uv run chordstream evaluate models/v9_h5p2 --cache data/cache_ext
+uv run python experiments/analysis_bollywood.py --v3 models/v9_h5p2   # 61 Bollywood test songs
+uv run chordstream export models/v9_h5p2        # ONNX + parity check
 
-# 8. Run (default bundle: models/v8)
+# 8. Run (default bundle: models/v9)
 uv run chordstream transcribe song.wav --ref song.lab --print   # simulated live stream + latency stats
 uv run chordstream mic                                           # local input device
 uv run chordstream serve                                         # http://localhost:8000 browser demo, ws://…/ws
@@ -263,22 +265,22 @@ against the hand-corrected labels instead of the aligned ones.
 
 ## Results
 
-The live model is **v8**: v7's recipe (extended vocabulary, 120 ms label delay, human labels only)
-trained on Billboard plus 47 Bollywood songs with cleaned sheet-aligned labels. Models are chosen by
-accuracy over **both** test sets.
+The live model is **v9**: v7's recipe (extended vocabulary, 120 ms label delay, human labels only)
+trained on Billboard plus 152 Bollywood songs (each seen twice) with cleaned sheet-aligned labels.
+Models are chosen by overall accuracy across **both** test sets.
 
-| | v8 (live) | v7 | v6 (zero delay, distilled) |
+| | v9 (live) | v8 | v7 |
 |---|---|---|---|
-| Bollywood, 23 test songs, majmin / full | **80.0% / 78.0%** | 68.9% / 61.3% | – |
-| Bollywood, share of time on the sheet's chords | **92.8%** | 89.5% | – |
-| Bollywood, 61 test songs (v3), majmin | **78.0%** | 60.7% | – |
-| Billboard, 36 clean held-out songs, majmin / full | 81.8% / 70.5% | **83.3% / 73.0%** | 80.8% / 70.3% |
-| **Overall** (mean of the two test sets, majmin) | **80.9%** | 76.1% | – |
-| Chord sheet (480 ms hold, v7) | – | 83.4% majmin, 1.03× changes | – |
+| Bollywood, 61 test songs, majmin / full | **80.0% / 77.4%** | 78.0% / 75.2% | 60.7% / 54.0% |
+| Bollywood, share of time on the sheet's chords | 89.8% | **90.4%** | 78.1% |
+| Bollywood, sheet's chord changes found in order | 78.4% | **78.6%** | 68.7% |
+| Billboard, 36 clean held-out songs, majmin / full | 80.2% / 67.7% | 81.8% / 70.5% | **83.3% / 73.0%** |
+| **Overall** (mean of the two test sets, majmin) | **80.1%** | 79.9% | 72.0% |
+| Chord sheet (480 ms hold, v7) | – | – | 83.4% majmin, 1.03× changes |
 
 Bollywood accuracy is measured against sheet-aligned labels (about 82–84% accurate when checked on
-Billboard); hand-corrected gold labels from the annotate page replace them song by song. Scaling to 152
-Bollywood training songs (E28) did not beat v8. The
+Billboard); hand-corrected gold labels from the annotate page replace them song by song. v9's lead
+over v8 is small and shows only on the aligned labels (E28), so gold labels will decide it. The
 first fine-tuned model scored 73.8% on Billboard's original 10. A step costs about 2.4 ms of CPU per
 40 ms frame. Every experiment, including the ones that didn't help, is in
 **[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)**, with commands and decisions. The batch scripts

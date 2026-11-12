@@ -399,7 +399,7 @@ def main(argv=None):
 
     s = sp.add_parser("transcribe", help="run the live engine over a file (simulated stream)")
     s.add_argument("audio")
-    s.add_argument("--bundle", default="models/v8")
+    s.add_argument("--bundle", default="models/v9")
     s.add_argument("--out", help="write predicted .lab")
     s.add_argument("--ref", help="reference .lab for accuracy")
     s.add_argument("--raw", action="store_true", help="disable HMM smoothing")
@@ -407,7 +407,7 @@ def main(argv=None):
     s.set_defaults(fn=cmd_transcribe)
 
     s = sp.add_parser("serve", help="FastAPI WebSocket server + browser mic demo")
-    s.add_argument("--bundle", default="models/v8")
+    s.add_argument("--bundle", default="models/v9")
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8000)
     s.add_argument("--ssl-certfile", help="serve HTTPS (needed for mic access from other devices)")
@@ -416,13 +416,13 @@ def main(argv=None):
     s.set_defaults(fn=cmd_serve)
 
     s = sp.add_parser("mic", help="live recognition from a local input device")
-    s.add_argument("--bundle", default="models/v8")
+    s.add_argument("--bundle", default="models/v9")
     s.add_argument("--device", type=int)
     s.add_argument("--list-devices", action="store_true")
     s.set_defaults(fn=cmd_mic)
 
     s = sp.add_parser("listen", help="live recognition of audio the system is playing (Windows loopback)")
-    s.add_argument("--bundle", default="models/v8")
+    s.add_argument("--bundle", default="models/v9")
     s.add_argument("--speaker", help="output device name substring (default: system default)")
     s.add_argument("--list-devices", action="store_true")
     s.set_defaults(fn=cmd_listen)

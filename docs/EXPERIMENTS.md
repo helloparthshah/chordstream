@@ -57,7 +57,8 @@ Comparisons inside one experiment always use the same set. Differences under ~0.
 | v6 (extended vocab) | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v6)) | 79.9% | 80.8% (36 clean); 70.3% full vocab | 1.6× | +80 ms | E18 |
 | teacher (offline, sees ±5 s) | never | 82.0% | 82.9% (36 clean) | 1.04× | – | E17 |
 | E23b (label delay 240 ms, human labels) | candidate | 83.0% | 83.9% (36 clean) | 1.44× | +240 ms display | E23 |
-| **v8** (v7 + 47 Bollywood songs, cleaned sheet labels) | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v8)) | 79.6% majmin | 81.8% majmin, 70.5% full (36 clean); **Bollywood 80.0% / 78.0%** (23) | 1.56× | 120 ms display | E21e |
+| **v9** (v7 recipe + 152 Bollywood songs ×2, cleaned sheet labels) | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v9)) | 77.1% majmin | 80.2% majmin, 67.7% full (36 clean); **Bollywood 80.0% / 77.4%** (61) | 1.62× | 120 ms display | E28b |
+| v8 (v7 + 47 Bollywood songs, cleaned sheet labels) | superseded ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v8)) | 79.6% majmin | 81.8% majmin, 70.5% full (36 clean); **Bollywood 80.0% / 78.0%** (23) | 1.56× | 120 ms display | E21e |
 | E24 (extended, human labels) | baseline | 80.9% majmin | 81.0% majmin, 70.7% full (36 clean) | 1.71× | +80 ms | E24 |
 | v7 (extended, 120 ms label delay, human labels) | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v7)) | **83.1%** majmin | **83.3% majmin, 73.0% full (36 clean)** | 1.48× | 120 ms display | E25 |
 
@@ -577,9 +578,11 @@ Dates are the day the experiment ran.
   - E28b does worse on the measures that don't depend on the aligner's timing: in sheet −0.6 pt,
     coverage −0.2 pt, 1.25× changes (more flicker). It is also −1.6 pt on Billboard.
   - The limit now looks like the quality of the sheet-aligned labels, not the number of songs.
-- **Decision:** keep **v8**. E28b's gain is within noise and fails the selection rule's check that the
-  aligner-independent metrics must not fall. Hand-corrected gold labels would show whether the extra
-  data helps on exact labels.
+- **Decision:** at first kept v8, because E28b's gain is within noise and the aligner-independent
+  metrics fell slightly. The user then chose to apply the selection rule as stated (overall accuracy
+  up, Billboard drop accepted). **E28b is deployed as v9** (HMM 5 s / power 2, ONNX parity 2.6e-06,
+  release [`model-v9`](https://github.com/helloparthshah/chordstream/releases/tag/model-v9)).
+  Hand-corrected gold labels should confirm it; if they don't, revert to v8.
 
 ### D01 · Key-aware chord spelling (display) · 2026-11-12
 - Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`
@@ -613,9 +616,10 @@ Dates are the day the experiment ran.
 | `e27b_rare50` | E27b | rare-chord mix (50 renders); candidate |
 | `e21a_bolly`, `e21b_bolly_ft` | E21 | Bollywood mix (scratch / fine-tune); Billboard regression, not deployed |
 | `e21a_live` | E21 | `e21a_bolly` + HMM 5 s / power 2, exported; was on trial in the UI; safe to delete |
-| `v8` | E21e | **live**, release `model-v8` (= `e21e_bolly_clean` + HMM 5 s / power 2) |
+| `v8` | E21e | previous live model, release `model-v8` (= `e21e_bolly_clean` + HMM 5 s / power 2) |
+| `v9` | E28b | **live**, release `model-v9` (= `e28b_bolly3x2` + HMM 5 s / power 2) |
 | `e21c_bolly_mask3`, `e21d_bolly_mask1`, `e21e_bolly_clean`, `e21f_bolly_clean_rare` | E21 | Bollywood variants (e21e = v8) |
-| `e28a_bolly3x1`, `e28b_bolly3x2` (+ `_h5p2` eval copies) | E28 | scaled Bollywood mixes; not deployed |
+| `e28a_bolly3x1`, `e28b_bolly3x2` (+ `_h5p2` eval copies) | E28 | scaled Bollywood mixes; e28b = v9 |
 | `teacher` | E17 | offline teacher for majmin distillation |
 | `exp_a`, `exp_b`, `exp_w2/3/5`, `exp_g10`, `synth_g10`, `exp_lr3`, `exp_big`, `synth_big`, `v4_clean`, `v4_orig`, `student` | E08–E17 | experiment outputs; safe to delete |
 | `ext_teacher` | E18 | offline teacher for extended-vocabulary distillation |
