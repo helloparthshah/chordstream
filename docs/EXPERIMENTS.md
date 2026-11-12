@@ -584,6 +584,32 @@ Dates are the day the experiment ran.
   release [`model-v9`](https://github.com/helloparthshah/chordstream/releases/tag/model-v9)).
   Hand-corrected gold labels should confirm it; if they don't, revert to v8.
 
+### F04 · Flicker anatomy of v9 (live readout) · 2026-11-12
+
+- **Script:** [`experiments/analysis_flicker.py`](../experiments/analysis_flicker.py). Measures the
+  live HMM path at the frames it describes, in the majmin view. A "blip" is A → B → A with B lasting
+  under 0.5 s.
+
+  | | changes/min (ref) | segments < 0.2 s | segments < 0.5 s (ref) | blips/min | blips wrong |
+  |---|---|---|---|---|---|
+  | v9, Billboard 36 | 46.4 (26.3) | 11.4% | 32.9% (3.2%) | 6.3 | 77% |
+  | v8, Billboard 36 | 44.5 (26.3) | 10.9% | 30.9% (3.2%) | 5.8 | 80% |
+  | v9, Bollywood 61 | 60.3 (47.3) | 16.9% | 47.2% (33.9%) | 10.8 | 61% |
+  | v8, Bollywood 61 | 55.5 (47.3) | 17.1% | 44.9% (33.9%) | 9.9 | 63% |
+
+- **Findings:**
+  - The readout changes about 1.8× as often as the reference on Billboard, and a third of its
+    segments are shorter than 0.5 s.
+  - Blips account for about 27–36% of the changes, and most of them are wrong.
+  - The wrong blips jump almost always to the chord a fourth or fifth away, or to a neighbouring
+    diatonic chord: E→D, D→E, B→E, C→G, G→D, F→C, Dm→Am. This looks like a bass or melody note
+    briefly outweighing the chord.
+  - v9 flickers 4–9% more than v8.
+  - The Bollywood reference is itself choppy (34% of segments under 0.5 s), which is aligner noise.
+    Billboard is the reliable flicker yardstick.
+- **UI:** the big readout shows every decision and plays a pop animation on each change, so every
+  blip is visible. Browser echo cancellation, noise suppression and auto-gain are already off.
+
 ### D01 · Key-aware chord spelling (display) · 2026-11-12
 - Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`
   keeps a ~30 s decaying histogram of the chords' notes, picks the best-fitting major-scale key
