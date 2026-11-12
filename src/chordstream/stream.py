@@ -19,7 +19,8 @@ from .beat import BeatTracker
 from .config import BundleConfig
 from .cqt import StreamingCQT
 from .hmm import OnlineHMM
-from .vocab import CLASS_NAMES, pretty_name
+from .spelling import KeySpeller
+from .vocab import CLASS_NAMES
 
 
 @dataclass
@@ -43,6 +44,7 @@ class ChordEvent:
     beat_name: str | None = None
     beat_t0: float | None = None
     delay: float = 0.0  # the chord fields describe the audio at time - delay (label-delay models)
+    key: str | None = None  # estimated key signature (major tonic), used for spelling names
 
     def as_dict(self) -> dict:
         return self.__dict__.copy()
@@ -82,6 +84,7 @@ class ChordStream:
         self.run_len = 0  # frames the live chord has held
         self.run_t0 = 0.0  # start of the current run, in described time
         self.committed = -1  # last chord written to the sheet
+        self.speller = KeySpeller(fps=1.0 / self.cfg.frontend.frame_seconds)
         self.compute_ms: list[float] = []
         if self.hmm:
             self.hmm.reset()
@@ -108,8 +111,10 @@ class ChordStream:
             fs = self.cfg.frontend.frame_seconds
             now = self.n_frames * fs
             delay = self.cfg.model.label_delay * fs
-            ev = ChordEvent(now, idx, CLASS_NAMES[idx], pretty_name(idx), conf, raw, changed, b.beat,
-                            round(b.bpm, 1), round(b.confidence, 2), delay=delay)
+            self.speller.update(idx)
+            ev = ChordEvent(now, idx, CLASS_NAMES[idx], self.speller.name(idx), conf, raw, changed, b.beat,
+                            round(b.bpm, 1), round(b.confidence, 2), delay=delay,
+                            key=None if self.speller.key is None else self.speller.name_key())
             # Sheet: commit a chord once it has held sheet_min_frames, backdated to where it began,
             # so blips shorter than that never reach the sheet (the live readout still shows them).
             if changed:
@@ -117,7 +122,7 @@ class ChordStream:
             self.run_len += 1
             if self.run_len >= self.sheet_min_frames and idx != self.committed:
                 self.committed = idx
-                ev.beat_label, ev.beat_name, ev.beat_t0 = CLASS_NAMES[idx], pretty_name(idx), round(self.run_t0, 3)
+                ev.beat_label, ev.beat_name, ev.beat_t0 = CLASS_NAMES[idx], self.speller.name(idx), round(self.run_t0, 3)
             events.append(ev)
         return events
 

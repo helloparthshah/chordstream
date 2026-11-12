@@ -403,3 +403,33 @@ def test_label_delay_predictions_are_realigned():
     feats = np.random.default_rng(0).random((100, 144)).astype(np.float32)
     raw, aligned = _predict_song(net, feats, "cpu"), predict_song(net, feats, "cpu")
     np.testing.assert_allclose(aligned[:97], raw[3:])
+
+
+def test_parse_freetext_ext():
+    from chordstream.vocab import CLASS_NAMES, IGNORE, NO_CHORD, parse_freetext_ext as f
+
+    names = {raw: (CLASS_NAMES[f(raw)] if f(raw) not in (None, IGNORE) else f(raw)) for raw in
+             ["C#m", "A", "Bbmaj7/D", "F#m7b5", "Gsus4", "Dsus2", "E7", "Am9", "Cadd9", "G5", "N.C.", "Caug", "Bdim", "hello"]}
+    assert names["C#m"] == "C#:min" and names["A"] == "A:maj" and names["Bbmaj7/D"] == "Bb:maj7"
+    assert names["F#m7b5"] == "F#:dim" and names["Gsus4"] == "G:sus4" and names["Dsus2"] == "D:sus2"
+    assert names["E7"] == "E:7" and names["Am9"] == "A:min7" and names["Cadd9"] == "C:maj"
+    assert names["G5"] == IGNORE and f("N.C.") == NO_CHORD and names["Caug"] == "C:aug"
+    assert names["Bdim"] == "B:dim" and names["hello"] is None
+
+
+def test_key_speller():
+    from chordstream.spelling import KeySpeller, spelled_name
+    from chordstream.vocab import QUALITIES, ext_index
+
+    maj, mn = QUALITIES.index("maj"), QUALITIES.index("min")
+    E, B, Csm, A, Gsm = ext_index(4, maj), ext_index(11, maj), ext_index(1, mn), ext_index(9, maj), ext_index(8, mn)
+    sp = KeySpeller(fps=25, min_seconds=1)
+    for c in [E, B, Csm, A] * 50:
+        sp.update(c)
+    assert sp.key == 4 and sp.name(Gsm) == "G#m" and sp.name(Csm) == "C#m" and sp.name_key() == "E / C#m"
+    Ab, Db, Eb, Fm = ext_index(8, maj), ext_index(1, maj), ext_index(3, maj), ext_index(5, mn)
+    sp.reset()
+    for c in [Ab, Db, Eb, Fm] * 50:
+        sp.update(c)
+    assert sp.key == 8 and sp.name(Db) == "Db" and sp.name(Ab) == "Ab"
+    assert spelled_name(Gsm, None) == "Abm"  # before a key is known: canonical spelling

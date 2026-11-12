@@ -141,6 +141,45 @@ def parse_freetext(raw: str) -> int | None:
     return class_index(root, minor=False)  # "", 7, 9, 6, add9, 13, ...
 
 
+def parse_freetext_ext(raw: str) -> int | None:
+    """Like parse_freetext but into the extended vocabulary (maj, min, 7, maj7, m7, dim, aug, sus2,
+    sus4). Extensions reduce to the nearest class (9 -> 7, m9 -> m7, add9/6 -> maj, m6 -> min,
+    m7b5 -> dim); power chords ("5") return IGNORE; slash bass is dropped."""
+    s = raw.strip().replace(" ", "")
+    if not s:
+        return None
+    if s.lower() in _NO_CHORD_STRINGS:
+        return NO_CHORD
+    parsed = _parse_root(s)
+    if parsed is None:
+        return None
+    root, tail = parsed
+    if not _VALID_TAIL.match(tail):
+        return None
+    q = tail.split("/")[0].replace("(", "").replace(")", "")
+    ql = q.lower()
+    if q in ("5", "(5)"):
+        return IGNORE
+    if any(t in ql for t in ("dim", "°", "ø", "m7b5", "m7-5", "mb5", "m-5")):
+        return ext_index(root, QUALITIES.index("dim"))
+    if ql.startswith("aug") or q.startswith("+") or ("#5" in q and not q.startswith("m")):
+        return ext_index(root, QUALITIES.index("aug"))
+    if "sus2" in ql or q == "2":
+        return ext_index(root, QUALITIES.index("sus2"))
+    if "sus" in ql or q == "4":
+        return ext_index(root, QUALITIES.index("sus4"))
+    if q.startswith(("maj", "Maj", "MA", "M", "Δ")):
+        return ext_index(root, QUALITIES.index("maj7" if any(d in q for d in ("7", "9", "11", "13")) else "maj"))
+    if q.startswith(("min", "mi", "m", "-")):
+        rest = q.lstrip("min-")
+        if rest.startswith(("maj", "M")):
+            return ext_index(root, QUALITIES.index("min"))
+        return ext_index(root, QUALITIES.index("min7" if any(d in rest for d in ("7", "9", "11", "13")) else "min"))
+    if q.startswith(("7", "9", "11", "13")):
+        return ext_index(root, QUALITIES.index("7"))
+    return ext_index(root, QUALITIES.index("maj"))  # "", 6, add9, ...
+
+
 # ---------------------------------------------------------------- Harte (.lab) chords
 
 _MAJOR_Q = {"maj", "maj7", "7", "maj6", "9", "maj9", "11", "13", "maj11", "maj13", "6"}

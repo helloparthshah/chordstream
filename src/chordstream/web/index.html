@@ -178,7 +178,7 @@
       <div class="vizhead"><span class="label">Pitch classes</span><span class="label">chord tones lit</span></div>
       <canvas id="chroma"></canvas>
       <div class="vizhead" id="beatrow"><span class="label">Beat</span>
-        <span class="beatinfo"><span id="pulse" title="Flashes on each detected beat"></span><span id="bpm" class="label stats">–</span></span></div>
+        <span class="beatinfo"><span id="pulse" title="Flashes on each detected beat"></span><span id="bpm" class="label stats">–</span><span id="key" class="label stats" title="Estimated key signature (used to spell chord names)"></span></span></div>
       <canvas id="timeline" title="Last 6 s: beat ticks above, chords below"></canvas>
     </div>
   </section>
@@ -429,6 +429,7 @@ function onBeatEvent(e) {
   while (b.beats.length && b.beats[0].t < cut) b.beats.shift();
   while (b.segs.length > 1 && b.segs[1].t < cut) b.segs.shift();
   $('bpm').textContent = conf >= LOCK && e.bpm ? `${Math.round(e.bpm)} BPM` : 'finding beat…';
+  $('key').textContent = e.key ? ` · key ${e.key}` : '';
   $('beatrow').classList.toggle('locked', conf >= LOCK);
 }
 function chordColor(label) {
@@ -602,7 +603,7 @@ async function startInner(source, label) {
     setStatus(msg, kind); session = null; lastName = null;
     chromaSmooth.fill(0); drawFrame(null, 16000);
     Object.assign(beatState, { beats: [], segs: [], lastT: 0 }); drawTimeline();
-    $('bpm').textContent = '–'; $('beatrow').classList.remove('locked');
+    $('bpm').textContent = '–'; $('key').textContent = ''; $('beatrow').classList.remove('locked');
   };
   if (audio[0]) audio[0].onended = () => session && session();
   ws.onclose = () => session && session('Disconnected', 'err');

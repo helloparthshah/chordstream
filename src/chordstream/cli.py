@@ -60,6 +60,21 @@ def cmd_features(a):
     print(f"cached {n} new songs -> {a.out}")
 
 
+def cmd_bollywood(a):
+    from .data import bollywood as b
+
+    if a.stage == "songs":
+        print(f"added {b.stage_songs(range(a.year_from, a.year_to + 1), a.per_year)} songs")
+    elif a.stage == "sheets":
+        print(b.stage_sheets())
+    elif a.stage == "validate":
+        print(b.stage_validate())
+    elif a.stage == "audio":
+        print(b.stage_audio(a.cookies_from_browser))
+    elif a.stage == "cache":
+        print(b.stage_cache(a.out))
+
+
 def cmd_train(a):
     from .config import ModelConfig
     from .train import train
@@ -268,6 +283,15 @@ def main(argv=None):
     s.add_argument("--gamma", type=float, default=FrontendConfig.gamma,
                    help="variable-Q offset (Hz): larger = shorter low-frequency windows, faster response")
     s.set_defaults(fn=cmd_features)
+
+    s = sp.add_parser("bollywood", help="E21: Bollywood songs + UG sheets -> aligned labels")
+    s.add_argument("stage", choices=["songs", "sheets", "validate", "audio", "cache"])
+    s.add_argument("--year-from", type=int, default=2010)
+    s.add_argument("--year-to", type=int, default=2024)
+    s.add_argument("--per-year", type=int, default=25)
+    s.add_argument("--cookies-from-browser", default="firefox")
+    s.add_argument("--out", default="data/cache_bolly")
+    s.set_defaults(fn=cmd_bollywood)
 
     s = sp.add_parser("train")
     s.add_argument("--cache", default="data/cache")
