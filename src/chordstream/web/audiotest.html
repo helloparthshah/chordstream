@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audio Route Test</title>
+<style>
+  :root { --bg: #111318; --fg: #eef0f4; --muted: #9aa0ab; --panel: #1b1e25; --accent: #8b7cf6; --good: #3fb97f; --bad: #e5675f; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg: #f6f7f9; --fg: #15171c; --muted: #5d636e; --panel: #fff; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.45 system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  p { color: var(--muted); margin: 0 0 16px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin: 10px 0; background: var(--panel); border-radius: 12px; }
+  button { flex: none; font: 600 15px system-ui; padding: 10px 14px; border-radius: 10px; border: 0; background: var(--accent); color: #fff; min-width: 52px; }
+  button:disabled { opacity: .5; }
+  .name { font-weight: 600; }
+  .desc { color: var(--muted); font-size: 13px; }
+  .tap { margin-left: auto; font-size: 13px; color: var(--muted); text-align: right; min-width: 70px; font-variant-numeric: tabular-nums; }
+  .tap.ok { color: var(--good); } .tap.bad { color: var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Audio route test</h1>
+  <p>Start your screen recorder (device audio), then tap each button in turn. Each plays a 3-second
+     chord. Afterwards, play the recording back and note which numbers you can hear. "tap" shows whether
+     the chord engine would receive the audio on that route.</p>
+  <div id="list"></div>
+</main>
+<script>
+// Each route plays the same 3 s C-major chord and, where possible, taps it the way the chord
+// engine would (an AudioWorklet that counts samples), so we learn which routes a screen recorder
+// can capture AND still feed live audio to the engine.
+const SR = 44100, DUR = 3;
+function chordWav() {
+  const n = SR * DUR, data = new Int16Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i / SR, env = Math.min(1, t * 20) * Math.min(1, (DUR - t) * 8);
+    const v = [261.63, 329.63, 392.0, 523.25].reduce((s, f) => s + Math.sin(2 * Math.PI * f * t), 0) / 4;
+    data[i] = v * env * 0.5 * 32767;
+  }
+  const buf = new ArrayBuffer(44 + n * 2), dv = new DataView(buf);
+  const w = (o, s) => [...s].forEach((c, i) => dv.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+  dv.setUint32(24, SR, true); dv.setUint32(28, SR * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+  w(36, 'data'); dv.setUint32(40, n * 2, true); new Int16Array(buf, 44).set(data);
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+const URL_WAV = chordWav();
+const WORKLET = URL.createObjectURL(new Blob([`
+class Count extends AudioWorkletProcessor {
+  constructor() { super(); this.n = 0; this.e = 0; this.last = 0; }
+  process(inputs) {
+    const ch = inputs[0][0];
+    if (ch) { this.n += ch.length; for (const v of ch) this.e += v * v; }
+    if (currentTime - this.last > 0.25) { this.last = currentTime; this.port.postMessage({ n: this.n, e: this.e }); }
+    return true;
+  }
+}
+registerProcessor('count', Count);`], { type: 'application/javascript' }));
+
+async function tapper(ctx, node, out) {
+  await ctx.audioWorklet.addModule(WORKLET);
+  const w = new AudioWorkletNode(ctx, 'count');
+  node.connect(w);
+  w.port.onmessage = (m) => {
+    const rms = Math.sqrt(m.data.e / Math.max(1, m.data.n));
+    out.textContent = rms > 0.01 ? `tap ✓ ${(m.data.n / ctx.sampleRate).toFixed(1)} s` : 'tap: silent';
+    out.className = 'tap ' + (rms > 0.01 ? 'ok' : 'bad');
+  };
+}
+function player() { const a = new Audio(URL_WAV); a.preload = 'auto'; return a; }
+const done = (a, ctx) => new Promise((r) => { a.onended = () => { setTimeout(() => { ctx?.close(); r(); }, 300); }; });
+
+const ROUTES = [
+  { name: '1 · Plain audio element', desc: 'No Web Audio (the current file mode). The engine gets samples separately.',
+    run: async (out) => { const a = player(); out.textContent = 'no tap'; await a.play(); await done(a); } },
+  { name: '2 · Web Audio, low-latency', desc: 'Yesterday\'s file mode: element → AudioContext → speaker.',
+    run: async (out) => { const ctx = new AudioContext(); const a = player(); const s = ctx.createMediaElementSource(a);
+      s.connect(ctx.destination); await tapper(ctx, s, out); await ctx.resume(); await a.play(); await done(a, ctx); } },
+  { name: '3 · Web Audio, playback latency', desc: 'Same, but AudioContext({latencyHint: "playback"}): normal (non-low-latency) output path.',
+    run: async (out) => { const ctx = new AudioContext({ latencyHint: 'playback' }); const a = player(); const s = ctx.createMediaElementSource(a);
+      s.connect(ctx.destination); await tapper(ctx, s, out); await ctx.resume(); await a.play(); await done(a, ctx); } },
+  { name: '4 · Element plays, tapped by captureStream', desc: 'Element → speaker as normal; a copy goes to an AudioContext (playback latency, no output).',
+    run: async (out) => { const ctx = new AudioContext({ latencyHint: 'playback' }); const a = player(); await a.play();
+      const ms = a.captureStream(); const go = async () => { if (!ms.getAudioTracks().length) return setTimeout(go, 50);
+        await tapper(ctx, ctx.createMediaStreamSource(ms), out); }; go(); await done(a, ctx); } },
+  { name: '5 · Web Audio → stream → audio element', desc: 'Element → AudioContext → MediaStreamDestination → a second <audio> plays it.',
+    run: async (out) => { const ctx = new AudioContext({ latencyHint: 'playback' }); const a = player(); const s = ctx.createMediaElementSource(a);
+      const dest = ctx.createMediaStreamDestination(); s.connect(dest); await tapper(ctx, s, out);
+      const sink = new Audio(); sink.srcObject = dest.stream; await ctx.resume(); await sink.play(); await a.play();
+      await done(a, ctx); sink.srcObject = null; } },
+];
+const list = document.getElementById('list');
+ROUTES.forEach((r) => {
+  const row = document.createElement('div'); row.className = 'row';
+  const b = document.createElement('button'); b.textContent = '▶';
+  const txt = document.createElement('div'); txt.innerHTML = `<div class="name"></div><div class="desc"></div>`;
+  txt.querySelector('.name').textContent = r.name; txt.querySelector('.desc').textContent = r.desc;
+  const out = document.createElement('div'); out.className = 'tap'; out.textContent = '';
+  b.onclick = async () => {
+    document.querySelectorAll('button').forEach((x) => (x.disabled = true));
+    try { await r.run(out); } catch (err) { out.textContent = `error: ${err.name}`; out.className = 'tap bad'; }
+    document.querySelectorAll('button').forEach((x) => (x.disabled = false));
+  };
+  row.append(b, txt, out); list.append(row);
+});
+</script>
+</body>
+</html>
