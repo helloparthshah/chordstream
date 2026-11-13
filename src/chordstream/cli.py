@@ -94,12 +94,14 @@ def cmd_train(a):
     from .vocab import N_CLASSES, N_EXT
 
     ext = a.vocab == "extended"
-    mcfg = ModelConfig(context_frames=a.context, d_model=a.d_model, n_layers=a.layers,
+    fcfg = FrontendConfig(gamma=a.gamma, bins_per_octave=a.bins_per_octave, n_bins=6 * a.bins_per_octave)
+    mcfg = ModelConfig(context_frames=a.context, d_model=a.d_model, n_layers=a.layers, n_bins=fcfg.n_bins,
                        n_classes=N_EXT if ext else N_CLASSES, structured=ext or a.structured, key_input=a.key_input,
                        label_delay=a.label_delay, sheet_delay=a.sheet_delay)
     train(a.cache, a.out, a.epochs, a.batch_size, a.lr, a.crops, a.init, a.progressions, a.holdout_prefix,
-          a.workers, a.device, mcfg, a.transition_weight, a.transition_window, a.seed, FrontendConfig(gamma=a.gamma),
-          a.eval_every, a.bidirectional, a.distill_weight, a.aux_weight, a.stability_weight, a.bass_dropout, a.random_eq)
+          a.workers, a.device, mcfg, a.transition_weight, a.transition_window, a.seed, fcfg,
+          a.eval_every, a.bidirectional, a.distill_weight, a.aux_weight, a.stability_weight, a.bass_dropout, a.random_eq,
+          a.early_weight, a.early_window, a.micro_shift, a.tune_share)
 
 
 def cmd_export(a):
@@ -340,6 +342,13 @@ def main(argv=None):
     s.add_argument("--device")
     s.add_argument("--transition-weight", type=float, default=1.0, help="loss weight just after chord changes")
     s.add_argument("--transition-window", type=float, default=0.5, help="seconds after a change to up-weight")
+    s.add_argument("--bins-per-octave", type=int, default=24, help="CQT resolution (fresh models only; E37: 36)")
+    s.add_argument("--tune-share", type=float, default=0.0,
+                   help="share of training crops drawn from detuned tunex__ copies (0 = by duration, E35b)")
+    s.add_argument("--micro-shift", action="store_true", help="random +-1 sub-semitone bin shift, labels kept (E37)")
+    s.add_argument("--early-weight", type=float, default=0.0,
+                   help="weight of the early-switch penalty: -log(1 - p(next chord)) before each change (E36)")
+    s.add_argument("--early-window", type=float, default=0.5, help="seconds before a change the penalty covers")
     s.add_argument("--seed", type=int, default=0)
     s.add_argument("--eval-every", type=int, default=1, help="score held-out songs every N epochs (and the last)")
     s.add_argument("--bidirectional", action="store_true", help="train an offline teacher (sees future audio)")

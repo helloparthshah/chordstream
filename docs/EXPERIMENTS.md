@@ -69,7 +69,7 @@ a trained-in 120 ms label delay (E23/E25, +2.5 majmin and fewer flips), more dat
 transition loss (E09, lag 120 → 40–80 ms), and a 480 ms hold for the chord sheet (F03, changes
 1.6× → 1.03×). Distillation gave +0.7 (E17) but is no longer used (policy above; E24 showed no
 gain on the extended model).
-Things that did **not** help: beat or key priors in the HMM, a faster frontend, a bigger model
+Things that did **not** help: an early-switch penalty (E36), detuned training copies (E35, fixes the tuning cliff but costs Bollywood), 36 bins/octave (E37 pilot), beat or key priors in the HMM, a faster frontend, a bigger model
 at the old learning rate, re-timing labels (for training), data beyond ~200 songs at the old
 training budget, drum suppression (E19), a learned raw-waveform front end instead of the CQT (E33, −4), re-tuning HMM stickiness for flicker (F09), a stability loss (E22), draft/verify "speculative"
 display (F02), a second longer-delay head (E26), and per-beat averaging once the model has
@@ -816,7 +816,7 @@ Dates are the day the experiment ran.
   k20 / t0.05 (Billboard 80.3%, 33.8 changes/min, 1.6 blips/min) is already at its calm end; growing k
   buys ≤ 0.8 changes/min for 0.3 pt. thr 0.2 barely holds at all.
 - **Single song** ([`song_flicker.py`](../experiments/song_flicker.py), real streaming engine): Bohemian
-  Rhapsody (no reference labels yet) live 55.3 / Steady 40.6 changes/min, 8.5 / 2.0 blips/min.
+  Rhapsody (before reference labels; see F11) live 55.3 / Steady 40.6 changes/min, 8.5 / 2.0 blips/min.
 - **Decision:** keep k20 / t0.05. Display-side rules are exhausted (F05, F09, F10); further flicker
   reduction has to come from the network.
 
@@ -847,6 +847,82 @@ Dates are the day the experiment ran.
   - CPU per step 4.4 ms vs 3.0 ms (budget 40 ms). Full vocabulary: Billboard 71.0%, Bollywood 78.4%.
 - **Decision:** deployed **E34b as v11** (+2.0 pt overall clean, inversions +6 pt, no-bass within
   1.5 pt of v10; ONNX parity 2.86e-06).
+
+### F11 · Tuning robustness of v11 · 2026-11-12
+- **Script:** [`analysis_detune.py`](../experiments/analysis_detune.py): every test song analysed with the CQT
+  reference moved by −45..+45 cents (detuning the audio by c cents ≡ `fmin · 2^(−c/1200)`), majmin, HMM.
+- **Trigger:** Bohemian Rhapsody (Isophonics labels, `data/isophonics_queen`, +1.24 s offset) scored
+  68.0% / 40.6 changes/min on v11's Steady display (v10 63.2% / 45.9); retuning the audio by +17 cents
+  raised it to **75.4% / 37.4** (reference 36.4 changes/min). The recording is flat of A440.
+
+  | v11 | −45 | −30 | −15 | 0 | +15 | +30 | +45 |
+  |---|---|---|---|---|---|---|---|
+  | Billboard | 8.8% | 32% | 79% | 81.5% | 82% | 79% | 73% |
+  | Bollywood | 13.5% | 14.6% | 77% | 81% | 67% | 64% | 67% |
+
+- **Findings:** a cliff ~25 cents flat (the CQT bins sit halfway between semitones and the model picks
+  the wrong neighbour). About 16 of the 97 test songs are > 10 cents off A440. Live tuning estimation
+  ([`tuning.py`](../src/chordstream/tuning.py), spectral-peak circular mean) was too fragile: one
+  estimate landed on the cliff and sent a Bollywood song to ~4%. So the fix has to be in training.
+
+### E37 · 36 bins/octave pilot (user suggestion) · 2026-11-12 — `models/e37a_bins24`, `e37b_bins36`, `e37c_bins36_micro`
+- **Script:** [`2026-11-12_cqt36_pilot.ps1`](../experiments/2026-11-12_cqt36_pilot.ps1)
+  ([`build_cqt36_cache.py`](../experiments/build_cqt36_cache.py) → `data/cache_ext36`). Small setup for
+  early validation: Billboard only, from scratch, 5 s context, 40 epochs. A = 24 bins (control),
+  B = 36 bins/octave (`--bins-per-octave 36`), C = 36 bins + random ±1-bin (±33 cent) shift, labels
+  kept (`--micro-shift`).
+
+  | Billboard test | −45 | −30 | −15 | 0 | +15 | +30 | +45 | val |
+  |---|---|---|---|---|---|---|---|---|
+  | A 24 bins | 24.0% | 76.3% | 82.6% | 83.1% | 82.8% | 79.7% | 71.5% | 72.7% |
+  | B 36 bins | 25.8% | 76.5% | 82.8% | 83.2% | 82.8% | 80.6% | 73.2% | 72.9% |
+  | C 36 + shift | **42.5%** | **78.1%** | 82.6% | 82.8% | 81.9% | 79.9% | 70.6% | 72.1% |
+
+- **Findings:** 36 bins alone change nothing (≤ 2 pt). The shift augmentation is what helps, and only
+  partly (±33 cents doesn't cover 45). These small models are far less tuning-sensitive than v11
+  (76% vs 32% at −30): v11's long context / long fine-tuning is what made it brittle.
+- **Decision:** not worth rebuilding every cache at 36 bins. Test tuning augmentation on the full recipe (E35).
+
+### E35 · Detuned training copies · 2026-11-12 — `models/e35_tune`, `models/e35b_tune25`
+- **Scripts:** [`build_tune_cache.py`](../experiments/build_tune_cache.py) (two copies per training song,
+  15–45 cents flat / sharp, `tunex__` prefix, train-only, 966 files),
+  [`2026-11-12_detune.ps1`](../experiments/2026-11-12_detune.ps1) (E35, v11 recipe on
+  `data/cache_ext_bolly3x2_tune`), [`2026-11-12_detune_share.ps1`](../experiments/2026-11-12_detune_share.ps1)
+  (E35b, `--tune-share 0.25`: detuned copies limited to 25% of crops; E35 sampled by duration, ~60%).
+- **Memory fix:** `CropDataset` now keeps features in float16 and converts each crop to float32 (the ×2.5
+  data set had exhausted 16 GB RAM: 400–1600 s/epoch while sharing the machine with E37).
+
+  | majmin | BB −45 | BB −30 | BB 0 | BB +45 | Bolly −30 | Bolly 0 | Bolly no bass < 150 / < 300 | overall clean |
+  |---|---|---|---|---|---|---|---|---|
+  | v11 | 8.8% | 32% | **81.5%** | **73%** | 14.6% | **81.0%** | **70.5 / 56.9%** | **81.2%** |
+  | E35 | 60.2% | **80.7%** | 81.0% | 60.2% | **73.4%** | 67.8% | 62.3 / 49.0% | 72.8% |
+  | E35b (25%) | **65.8%** | 77.0% | 81.2% | 54.7% | 40.1% | 77.4% | 69.7 / 56.4% | 78.8% |
+
+- **Checks:** detuned copies are time-aligned with the originals (lag 0 on 12 songs) and the cached
+  features match a fresh CQT to 0.002, so the Bollywood drop is real, not a data bug. Native tuning of
+  training songs (sample of 66): Billboard mostly within ±10 cents, Bollywood has a group near −30;
+  ~10% of detuned copies end up > 50 cents off (effectively a semitone away with the original labels).
+- **Findings:** detuned copies remove the Billboard flat cliff for ≤ 0.5 pt clean, but cost Bollywood
+  3.6–13 pt on in-tune audio, scaling with their share. The test sets already contain real-world tuning
+  spread, so their clean numbers are the realistic measure.
+- **Decision:** not deployed (−2.4 to −8 pt overall). Possible follow-up: choose each copy's shift from the
+  song's measured native tuning so no copy passes ±40 cents, and a smaller share (10%).
+
+### E36 · Early-switch penalty (user idea) · 2026-11-12 — `models/e36a_early1`, `models/e36b_early3`
+- **Script:** [`2026-11-12_early_switch.ps1`](../experiments/2026-11-12_early_switch.ps1). Extra loss
+  `−log(1 − p(next chord))` on the frames shortly before each labelled change (`--early-weight`,
+  `--early-window`), 0.5 s window: a weight 1, b weight 3; v11 recipe otherwise.
+
+  | | BB live | BB changes/min | Bolly live | Bolly changes/min | BB / Bolly Steady | Steady changes/min |
+  |---|---|---|---|---|---|---|
+  | v11 | **81.5%** | 44.7 | **81.0%** | **62.6** | **80.3 / 78.1%** | 33.8 / **43.3** |
+  | E36a | 80.8% | **43.8** | 80.4% | 64.1 | 79.5 / 77.8% | **33.7** / 45.7 |
+  | E36b | 79.9% | 44.5 | 79.7% | 68.0 | 79.0 / 77.8% | 34.9 / 51.8 |
+
+- **Findings:** −0.6 to −1.6 pt and no less flicker. The
+  penalty pushes probability off the upcoming chord without making the current one stickier, so the
+  model hedges instead; the heavier weight flickers more on Bollywood. Flicker comes from uncertainty, not anticipation.
+- **Decision:** not deployed. With F05/F09/F10 this exhausts loss/display tweaks for flicker.
 
 ### D01 · Key-aware chord spelling (display) · 2026-11-12
 - Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`
@@ -884,6 +960,9 @@ Dates are the day the experiment ran.
 | `v9` | E28b | previous live model, release `model-v9` (= `e28b_bolly3x2` + HMM 5 s / power 2) |
 | `v10` | E32b | previous live model, release `model-v10` (= `e32b_eq5_bass3` + HMM 5 s / power 2) |
 | `v11` | E34b | **live**, release `model-v11` (= `e34b_ctx400_eq` + HMM 5 s / power 2) |
+| `e35_tune`, `e35b_tune25` (+ `_h5p2`) | E35 | detuned training copies; not deployed |
+| `e36a_early1`, `e36b_early3` (+ `_h5p2`) | E36 | early-switch penalty; not deployed |
+| `e37a_bins24`, `e37b_bins36`, `e37c_bins36_micro` (+ `_h5p2`) | E37 | small 36-bin pilot; safe to delete |
 | `e33a_raw_init`, `e33b_raw_scratch` | E33 | raw-waveform front end; not deployed |
 | `e34_ctx400`, `e34b_ctx400_eq` (+ `_h5p2`) | E34 | 16 s context; e34b = v11 |
 | `e31a_bassdrop3`, `e31b_bassdrop6`, `e32a_eq5`, `e32b_eq5_bass3` (+ `_h5p2`) | E31, E32 | bass dropout / random EQ; e32b = v10 |

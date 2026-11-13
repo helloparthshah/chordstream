@@ -37,6 +37,31 @@ def transition_weights(y: torch.Tensor, weight: float, window: int) -> torch.Ten
     return 1.0 + (weight - 1.0) * near
 
 
+def early_switch_targets(y: torch.Tensor, window: int) -> torch.Tensor:
+    """For each frame in the `window` frames before a chord change, the chord that comes next
+    (IGNORE elsewhere). E36 (user idea): the network is penalised for already giving probability to
+    the upcoming chord before the change is due, i.e. for switching early."""
+    nxt = torch.full_like(y, IGNORE)
+    change = torch.zeros_like(y, dtype=torch.bool)
+    change[:, 1:] = (y[:, 1:] != y[:, :-1]) & (y[:, 1:] != IGNORE) & (y[:, :-1] != IGNORE)
+    T = y.shape[1]
+    for k in range(min(window, T - 1), 0, -1):  # nearest change wins
+        c = change[:, k:]
+        tgt = nxt[:, : T - k]
+        tgt[c] = y[:, k:][c]
+    nxt[(y == IGNORE) | (nxt == y)] = IGNORE
+    return nxt
+
+
+def early_switch_loss(logits: torch.Tensor, nxt: torch.Tensor) -> torch.Tensor:
+    """Mean -log(1 - p(next chord)) over frames before a change."""
+    m = nxt != IGNORE
+    if not m.any():
+        return logits.sum() * 0.0
+    p = torch.softmax(logits.float()[m], -1).gather(1, nxt[m][:, None])[:, 0]
+    return -torch.log1p(-p.clamp(max=1 - 1e-4)).mean()
+
+
 def _collate(batch):
     x = torch.from_numpy(np.stack([b[0] for b in batch]))
     y = torch.from_numpy(np.stack([b[1] for b in batch]))
@@ -196,6 +221,10 @@ def train(
     stability_weight: float = 0.0,
     bass_dropout: float = 0.0,
     random_eq: float = 0.0,
+    early_weight: float = 0.0,
+    early_window_s: float = 0.5,
+    micro_shift: bool = False,
+    tune_share: float = 0.0,
 ) -> Path:
     if seed is not None:
         torch.manual_seed(seed)
@@ -224,7 +253,8 @@ def train(
     train_files, val_files = split_files(cache, holdout_prefix=holdout_prefix)
     print(f"train songs: {len(train_files)}  val songs: {len(val_files)}  device: {dev}")
     ds = CropDataset(train_files, crop, fcfg.bins_per_semitone, augment=True, crops_per_epoch=crops_per_epoch,
-                     n_classes=mcfg.n_classes, bass_dropout=bass_dropout, random_eq=random_eq)
+                     n_classes=mcfg.n_classes, bass_dropout=bass_dropout, random_eq=random_eq,
+                     micro_shift=micro_shift, tune_share=tune_share)
     dl = DataLoader(ds, batch_size=batch_size, shuffle=True, num_workers=workers, collate_fn=_collate,
                     drop_last=True, persistent_workers=workers > 0)
 
@@ -270,6 +300,9 @@ def train(
             w = transition_weights(y, transition_weight, round(transition_window_s / fcfg.frame_seconds)).reshape(-1)
             w = w * (y.reshape(-1) != IGNORE)
             loss = (ce * w).sum() / w.sum().clamp_min(1.0)
+            if early_weight > 0:  # E36: penalise switching to the next chord before it is due
+                nxt = early_switch_targets(y, round(early_window_s / fcfg.frame_seconds))
+                loss = loss + early_weight * early_switch_loss(logits, nxt)
             if y_sheet is not None:  # E26: the long-delay sheet head, same weighted loss
                 y_sheet[:, :WARMUP_CONTEXT] = IGNORE
                 ce2 = F.cross_entropy(out["sheet"].float().reshape(-1, mcfg.n_classes), y_sheet.reshape(-1),

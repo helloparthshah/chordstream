@@ -31,10 +31,22 @@ if len(sys.argv) > 3:
     from chordstream.data.dataset import frame_labels
     from chordstream.evaluate import majmin_view
     from chordstream.vocab import IGNORE
-    ref = frame_labels(read_lab(sys.argv[3]), len(ev), eng.cfg.frontend)
+    segs = read_lab(sys.argv[3])
+
+    def ref_at(off):  # reference shifted by off seconds (audio and reference may be different masters)
+        return frame_labels([(s + off, e + off, c) for s, e, c in segs], len(ev), eng.cfg.frontend)
+
+    def acc(seq, ref):
+        p2, y2 = majmin_view(seq, ref); m = y2 != IGNORE
+        return (p2[m] == y2[m]).mean()
+
+    offs = np.round(np.arange(-3, 3.01, 0.04), 2)
+    off = offs[int(np.argmax([acc(live, ref_at(o)) for o in offs]))]
+    print(f"best reference offset {off:+.2f} s (live accuracy {acc(live, ref_at(0)):.3f} at 0)")
+    ref = ref_at(off)
     report("labels", np.where(ref == IGNORE, 0, ref))
     for nm, seq in (("live", live), ("steady", steady)):
-        p2, y2 = majmin_view(seq, ref); m = y2 != IGNORE
-        print(f"{nm} majmin accuracy {(p2[m] == y2[m]).mean():.3f}")
+        print(f"{nm} majmin accuracy {acc(seq, ref):.3f}   per 30 s: "
+              + " ".join(f"{acc(seq[i:i + 750], ref[i:i + 750]):.2f}" for i in range(0, len(seq), 750)))
 print("\nSteady display timeline (majmin):")
 print("  ".join(f"{b[i] * FS:.1f}s {CLASS_NAMES[v]}" for i, v in enumerate(vals)))

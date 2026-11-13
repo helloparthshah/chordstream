@@ -111,7 +111,7 @@ def cache_features(src_dirs: list[str | Path], out: str | Path, cfg: FrontendCon
     return n
 
 
-TRAIN_ONLY = ("synthx__", "bollytrain__", "roomx__")  # synthetic renders; Bollywood training copies (E21); room-echo copies (E29)
+TRAIN_ONLY = ("synthx__", "bollytrain__", "roomx__", "tunex__")  # synthetic renders; Bollywood training copies (E21); room-echo copies (E29)
 
 
 def cache_features_ext(src: str | Path, out: str | Path, prefix: str, cfg: FrontendConfig | None = None,
@@ -157,8 +157,10 @@ class CropDataset:
     """
 
     def __init__(self, files, crop: int, bins_per_semitone: int, augment: bool, crops_per_epoch: int, seed: int = 0,
-                 n_classes: int = N_CLASSES, bass_dropout: float = 0.0, random_eq: float = 0.0):
+                 n_classes: int = N_CLASSES, bass_dropout: float = 0.0, random_eq: float = 0.0,
+                 micro_shift: bool = False, tune_share: float = 0.0):
         self.songs = []
+        is_tune = []
         self.n_classes = n_classes
         for f in files:
             d = np.load(f)
@@ -169,15 +171,23 @@ class CropDataset:
                     aux = np.stack([d["root"], d["bass"], d["notes"]], 1).astype(np.int64)
                 else:
                     aux = np.tile(np.array([IGNORE, IGNORE, -1], np.int64), (T, 1))
-                self.songs.append((d["feats"].astype(np.float32), d["labels"].astype(np.int64), soft, aux))
+                feats = d["feats"]  # kept as stored (float16): crops are converted on read, halving RAM
+                self.songs.append((feats if feats.dtype == np.float16 else feats.astype(np.float32),
+                                   d["labels"].astype(np.int64), soft, aux))
+                is_tune.append(Path(f).name.startswith("tunex__"))
         if not self.songs:
             raise ValueError("no songs found for dataset")
         lengths = np.array([len(s[1]) for s in self.songs], dtype=np.float64)
         self.weights = lengths / lengths.sum()  # sample proportional to duration
+        tune = np.array(is_tune, bool)
+        if tune_share > 0 and tune.any() and (~tune).any():  # E35b: detuned copies get this share of the crops
+            self.weights[tune] *= tune_share / self.weights[tune].sum()
+            self.weights[~tune] *= (1 - tune_share) / self.weights[~tune].sum()
         self.crop, self.bps, self.augment, self.n = crop, bins_per_semitone, augment, crops_per_epoch
         self.seed = seed
         self.bass_dropout = bass_dropout  # E31: share of crops with the low register removed
         self.random_eq = random_eq  # E32: share of crops passed through a random EQ curve
+        self.micro_shift = micro_shift  # E37: random +-1 sub-semitone bin shift, labels unchanged
 
     def __len__(self) -> int:
         return self.n
@@ -190,7 +200,7 @@ class CropDataset:
         aux = np.tile(np.array([IGNORE, IGNORE, -1], np.int64), (self.crop, 1))
         if T >= self.crop:
             s = int(rng.integers(0, T - self.crop + 1))
-            x, y = feats[s : s + self.crop].copy(), labels[s : s + self.crop].copy()
+            x, y = feats[s : s + self.crop].astype(np.float32), labels[s : s + self.crop].copy()
             aux[:] = aux_all[s : s + self.crop]
             if soft is not None:
                 q[:] = soft[s : s + self.crop]
@@ -201,11 +211,12 @@ class CropDataset:
             if soft is not None:
                 q[-T:] = soft
         if self.augment:
+            nb = 72 * self.bps  # CQT bins (6 octaves); any columns after them are extra inputs
             k = int(rng.integers(-5, 7))
             if k:
-                if x.shape[1] > 144:  # E20: trailing 12 key columns rotate with the transposition
-                    key = np.roll(x[:, 144:156], k, axis=1)
-                    x = np.concatenate([shift_bins(x[:, :144], k * self.bps), key, x[:, 156:]], axis=1)
+                if x.shape[1] > nb:  # E20: trailing 12 key columns rotate with the transposition
+                    key = np.roll(x[:, nb:nb + 12], k, axis=1)
+                    x = np.concatenate([shift_bins(x[:, :nb], k * self.bps), key, x[:, nb + 12:]], axis=1)
                 else:
                     x = shift_bins(x, k * self.bps)
                 valid = y >= 0
@@ -217,20 +228,24 @@ class CropDataset:
                     v = (aux[:, col] >= 0) & (aux[:, col] < 12)
                     aux[v, col] = (aux[v, col] + k) % 12
                 aux[:, 2] = rotate_mask(aux[:, 2], k)
-            x[:, :144] *= rng.uniform(0.8, 1.2)  # loudness jitter in log domain (CQT bins only)
+            if self.micro_shift and self.bps >= 3:  # E37: label-preserving +-1 sub-semitone bin (+-33 cents at 3/semitone)
+                j = int(rng.integers(-1, 2))
+                if j:
+                    x[:, :nb] = shift_bins(x[:, :nb], j)
+            x[:, :nb] *= rng.uniform(0.8, 1.2)  # loudness jitter in log domain (CQT bins only)
             if self.bass_dropout and rng.random() < self.bass_dropout:
                 # E31 bass dropout: remove (or strongly attenuate) everything below a random cutoff,
                 # 6-30 semitones above C2 (F#2 ~92 Hz .. F#4 ~370 Hz), with a 2-semitone ramp, so the
                 # chord must be read from the upper harmony rather than the bass line.
                 cut = int(rng.integers(6, 31)) * self.bps
-                ramp = np.clip((np.arange(144) - (cut - 2 * self.bps)) / (2 * self.bps), 0, 1)
+                ramp = np.clip((np.arange(nb) - (cut - 2 * self.bps)) / (2 * self.bps), 0, 1)
                 floor = rng.uniform(0.0, 0.3)
-                x[:, :144] *= (floor + (1 - floor) * ramp).astype(np.float32)
+                x[:, :nb] *= (floor + (1 - floor) * ramp).astype(np.float32)
             if self.random_eq and rng.random() < self.random_eq:
-                x[:, :144] = apply_gain_db(x[:, :144], random_eq_db(rng, self.bps))
+                x[:, :nb] = apply_gain_db(x[:, :nb], random_eq_db(rng, self.bps, nb))
             if rng.random() < 0.5:  # frequency masking
-                f0 = int(rng.integers(0, 144 - 12))
-                x[:, f0 : f0 + int(rng.integers(1, 12))] = 0
+                f0 = int(rng.integers(0, nb - 6 * self.bps))
+                x[:, f0 : f0 + int(rng.integers(1, 6 * self.bps))] = 0
         return x, y, q, aux
 
 

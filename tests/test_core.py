@@ -462,3 +462,18 @@ def test_random_eq_gain_is_exact_on_log_features():
     assert g.shape == (144,) and np.isfinite(g).all()
     want = np.log1p(mag * 10 ** (g / 20)).astype(np.float32)
     assert np.allclose(apply_gain_db(np.log1p(mag), g), want, atol=1e-4)
+
+
+def test_early_switch_targets_mark_the_frames_before_each_change():
+    import torch
+
+    from chordstream.train import early_switch_loss, early_switch_targets
+    from chordstream.vocab import IGNORE
+
+    y = torch.tensor([[1, 1, 1, 1, 2, 2, 3, IGNORE, 4, 4]])
+    nxt = early_switch_targets(y, 2)
+    # change 1->2 at t=4 marks t=2,3; change 2->3 at t=6 marks t=4,5; the IGNORE gap is not a change
+    assert nxt.tolist() == [[IGNORE, IGNORE, 2, 2, 3, 3, IGNORE, IGNORE, IGNORE, IGNORE]]
+    logits = torch.zeros(1, 10, 5)
+    confident_next = logits.clone(); confident_next[0, 2:4, 2] = 10.0
+    assert early_switch_loss(confident_next, nxt) > early_switch_loss(logits, nxt) > 0

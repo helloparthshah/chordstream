@@ -113,8 +113,13 @@ timeline. It doesn't improve chord accuracy (E05, E16), so it is display-only.
   Inverted chords (C/E) are still named after their bass note about half the time (v11: 50% right,
   up from 44% thanks to the longer context).
 - **Brief wrong flashes:** about 6 per minute in the live chord, mostly to the chord a fourth or fifth
-  away (F04). The Steady display hides most of them.
+  away (F04). The Steady display hides most of them. HMM, display-rule and loss tweaks (F05, F09, F10,
+  E36) all trade accuracy for steadiness at the same rate.
 - **Room echo:** costs about 5 pt of accuracy but adds no flicker (F06).
+- **Off-pitch recordings:** v11 collapses when a recording is tuned more than ~25 cents flat of A440
+  (Billboard 32% at −30 cents; F11). Bohemian Rhapsody, which sits flat, scores 68% (75% retuned).
+  Detuned training copies fix it on Billboard but cost Bollywood accuracy (E35), and 36 bins/octave
+  alone doesn't help (E37), so v11 stays.
 
 ## Architecture
 

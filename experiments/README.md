@@ -43,6 +43,10 @@ They assume the synthetic init `models/latest` and the caches built by the CLI:
 | `analysis_hmm_grid.py` | F09 | HMM mean chord length × emission power: accuracy and flicker, live and Steady |
 | `analysis_duration_hold.py` | F10 | duration-aware Steady display grid |
 | `song_flicker.py` | F10 | one song through the live engine: live/Steady flicker, timeline, accuracy with a .lab |
+| `analysis_detune.py` | F11, E35, E37 | accuracy on the test songs detuned by −45..+45 cents (CQT reference shift) |
+| `analysis_tuning.py` | F11 | live tuning estimate + retune simulation (too fragile; not used) |
+| `build_tune_cache.py` | E35 | detuned copies (15–45 cents flat / sharp) of every training song → `data/cache_tune` |
+| `build_cqt36_cache.py` | E37 | 36 bins/octave feature cache → `data/cache_ext36` |
 | `hmm55.py` | E28 | copy a model to `<dir>_h5p2` with the deployed HMM (5 s / power 2) for evaluation |
 | `analysis_per_type.py` | E18, E27 | per-chord-type recall with a common HMM |
 | `analysis_label_cleaning.py` | E21 | aligner variants on Billboard: bass evidence, beat snapping, confidence mask |
