@@ -41,6 +41,8 @@ They assume the synthetic init `models/latest` and the caches built by the CLI:
 | `train_raw.py`, `prepare_raw.py` | E33 | learned raw-waveform front end: training + evaluation; 16 kHz int16 audio cache (`data/raw16k`) |
 | `analysis_raw_flicker.py` | F08, E34 | live and Steady-display flicker + accuracy for CQT or raw-waveform models on both test sets |
 | `analysis_hmm_grid.py` | F09 | HMM mean chord length × emission power: accuracy and flicker, live and Steady |
+| `analysis_duration_hold.py` | F10 | duration-aware Steady display grid |
+| `song_flicker.py` | F10 | one song through the live engine: live/Steady flicker, timeline, accuracy with a .lab |
 | `hmm55.py` | E28 | copy a model to `<dir>_h5p2` with the deployed HMM (5 s / power 2) for evaluation |
 | `analysis_per_type.py` | E18, E27 | per-chord-type recall with a common HMM |
 | `analysis_label_cleaning.py` | E21 | aligner variants on Billboard: bass evidence, beat snapping, confidence mask |

@@ -808,6 +808,18 @@ Dates are the day the experiment ran.
 - **Decision:** keep 5 s / power 2. Remaining flicker comes from the network; next idea is a
   duration-aware hold (a chord's exit threshold grows with how long it has played).
 
+### F10 · Duration-aware Steady display · 2026-11-12
+- **Script:** [`analysis_duration_hold.py`](../experiments/analysis_duration_hold.py) on v11. The evidence
+  hold's k grows with how long the shown chord has been up: k = k0 + slope × min(age, 5 s); k0 6/10/20,
+  slope 0–0.2, thr 0.05/0.2.
+- **Result:** every setting lies on the same accuracy/flicker frontier as the fixed hold. The deployed
+  k20 / t0.05 (Billboard 80.3%, 33.8 changes/min, 1.6 blips/min) is already at its calm end; growing k
+  buys ≤ 0.8 changes/min for 0.3 pt. thr 0.2 barely holds at all.
+- **Single song** ([`song_flicker.py`](../experiments/song_flicker.py), real streaming engine): Bohemian
+  Rhapsody (no reference labels yet) live 55.3 / Steady 40.6 changes/min, 8.5 / 2.0 blips/min.
+- **Decision:** keep k20 / t0.05. Display-side rules are exhausted (F05, F09, F10); further flicker
+  reduction has to come from the network.
+
 ### E34 · 16 s attention context · 2026-11-12 — `models/e34_ctx400`, `models/e34b_ctx400_eq` → `v11`
 
 - **Scripts:** [`2026-11-12_raw_and_context.ps1`](../experiments/2026-11-12_raw_and_context.ps1) (E34),
