@@ -57,14 +57,15 @@ Comparisons inside one experiment always use the same set. Differences under ~0.
 | v6 (extended vocab) | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v6)) | 79.9% | 80.8% (36 clean); 70.3% full vocab | 1.6× | +80 ms | E18 |
 | teacher (offline, sees ±5 s) | never | 82.0% | 82.9% (36 clean) | 1.04× | – | E17 |
 | E23b (label delay 240 ms, human labels) | candidate | 83.0% | 83.9% (36 clean) | 1.44× | +240 ms display | E23 |
-| **v11** (v10 + 16 s attention context) | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v11)) | – | 81.5% majmin, 71.0% full (36 clean); 79.6 / 72.6% without bass < 150 / 300 Hz; inverted 49.7%; **Bollywood 81.0% / 78.4%** (61), 70.5 / 56.9% without bass | 1.56× | 120 ms display | E34b |
+| **v12** (v10 recipe + 32 s attention context) | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v12)) | – | 82.5% majmin, 72.8% full (36 clean); 80.8 / 73.8% without bass < 150 / 300 Hz; inverted 52.8%; **Bollywood 82.4% / 79.8%** (61), 71.6 / 56.5% without bass | 1.36× | 120 ms display | E38 |
+| v11 (v10 + 16 s attention context) | superseded ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v11)) | – | 81.5% majmin, 71.0% full (36 clean); 79.6 / 72.6% without bass < 150 / 300 Hz; inverted 49.7%; **Bollywood 81.0% / 78.4%** (61), 70.5 / 56.9% without bass | 1.56× | 120 ms display | E34b |
 | v10 (v9 + random EQ + bass dropout) | superseded ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v10)) | – | 79.5% majmin, 66.8% full (36 clean); 78.1 / 71.0% without bass < 150 / 300 Hz; **Bollywood 79.1% / 76.5%** (61), 71.9 / 58.5% without bass | 1.68× | 120 ms display | E32b |
 | v9 (v7 recipe + 152 Bollywood songs ×2, cleaned sheet labels) | superseded ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v9)) | 77.1% majmin | 80.2% majmin, 67.7% full (36 clean); **Bollywood 80.0% / 77.4%** (61) | 1.62× | 120 ms display | E28b |
 | v8 (v7 + 47 Bollywood songs, cleaned sheet labels) | superseded ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v8)) | 79.6% majmin | 81.8% majmin, 70.5% full (36 clean); **Bollywood 80.0% / 78.0%** (23) | 1.56× | 120 ms display | E21e |
 | E24 (extended, human labels) | baseline | 80.9% majmin | 81.0% majmin, 70.7% full (36 clean) | 1.71× | +80 ms | E24 |
 | v7 (extended, 120 ms label delay, human labels) | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v7)) | **83.1%** majmin | **83.3% majmin, 73.0% full (36 clean)** | 1.48× | 120 ms display | E25 |
 
-Biggest wins: real data (E03, +28 pts over synthetic only), 16 s attention context (E34, +1.9 overall, +6 on inversions), Bollywood songs with cleaned sheet-aligned labels (E21, +11 pts on Bollywood, +4.8 overall), training budget (E13/E15, +2.4),
+Biggest wins: real data (E03, +28 pts over synthetic only), 16 → 32 s attention context (E34 + E38, +3.1 overall, +9 on inversions), Bollywood songs with cleaned sheet-aligned labels (E21, +11 pts on Bollywood, +4.8 overall), training budget (E13/E15, +2.4),
 a trained-in 120 ms label delay (E23/E25, +2.5 majmin and fewer flips), more data (E08, +2),
 transition loss (E09, lag 120 → 40–80 ms), and a 480 ms hold for the chord sheet (F03, changes
 1.6× → 1.03×). Distillation gave +0.7 (E17) but is no longer used (policy above; E24 showed no
@@ -924,6 +925,21 @@ Dates are the day the experiment ran.
   model hedges instead; the heavier weight flickers more on Bollywood. Flicker comes from uncertainty, not anticipation.
 - **Decision:** not deployed. With F05/F09/F10 this exhausts loss/display tweaks for flicker.
 
+### E38 · 32 s attention context · 2026-11-13 — `models/e38_ctx800` → `v12`
+- **Script:** [`2026-11-13_context800.ps1`](../experiments/2026-11-13_context800.ps1). v11's recipe with
+  `--context 800` (32 s, ~16 bars at 120 BPM), batch 8 (same frames per step), 73 s/epoch.
+
+  | majmin | BB clean / full | BB no bass < 150 / < 300 | inverted | Bolly clean / full | Bolly no bass < 150 / < 300 | **overall** | Steady changes/min (BB / Bolly) | Steady blips/min |
+  |---|---|---|---|---|---|---|---|---|
+  | v11 | 81.5 / 71.0% | 79.6 / 72.6% | 49.7% | 81.0 / 78.4% | 70.5 / **56.9%** | 81.3% | 33.8 / **43.3** | 1.6 / **3.4** |
+  | **E38** | **82.5 / 72.8%** | **80.8 / 73.8%** | **52.8%** | **82.4 / 79.8%** | **71.6** / 56.5% | **82.5%** | **32.9** / 46.6 | **1.0** / 4.2 |
+
+- **Findings:** context keeps paying: +1.2 pt overall, +3 pt on inversions, Billboard steadier (blips
+  −40%). Bollywood's Steady display changes a little more often (46.6/min vs labels' 41). The tuning
+  cliff is unchanged (Billboard −30 cents 33.6%). Bohemian Rhapsody (Isophonics labels) Steady 69.8%
+  (v11 68.0%). CPU 3.6 ms/frame vs 2.7 ms for v11 in the same run (p99 5.0 ms, budget 40 ms).
+- **Decision:** deployed **E38 as v12** (ONNX parity 3.10e-06).
+
 ### D01 · Key-aware chord spelling (display) · 2026-11-12
 - Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`
   keeps a ~30 s decaying histogram of the chords' notes, picks the best-fitting major-scale key
@@ -959,7 +975,9 @@ Dates are the day the experiment ran.
 | `v8` | E21e | previous live model, release `model-v8` (= `e21e_bolly_clean` + HMM 5 s / power 2) |
 | `v9` | E28b | previous live model, release `model-v9` (= `e28b_bolly3x2` + HMM 5 s / power 2) |
 | `v10` | E32b | previous live model, release `model-v10` (= `e32b_eq5_bass3` + HMM 5 s / power 2) |
-| `v11` | E34b | **live**, release `model-v11` (= `e34b_ctx400_eq` + HMM 5 s / power 2) |
+| `v12` | E38 | **live**, release `model-v12` (= `e38_ctx800` + HMM 5 s / power 2) |
+| `v11` | E34b | previous live model, release `model-v11` (= `e34b_ctx400_eq` + HMM 5 s / power 2) |
+| `e38_ctx800` (+ `_h5p2`) | E38 | 32 s context; = v12 |
 | `e35_tune`, `e35b_tune25` (+ `_h5p2`) | E35 | detuned training copies; not deployed |
 | `e36a_early1`, `e36b_early3` (+ `_h5p2`) | E36 | early-switch penalty; not deployed |
 | `e37a_bins24`, `e37b_bins36`, `e37c_bins36_micro` (+ `_h5p2`) | E37 | small 36-bin pilot; safe to delete |
