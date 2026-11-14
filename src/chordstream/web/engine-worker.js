@@ -17,7 +17,7 @@ onmessage = (m) => {
     Engine.load(ort, new URL('../model/', import.meta.url).href, { provider: d.provider })
       .then((e) => {
         eng = e;
-        postMessage({ type: 'ready', provider: e.provider, sample_rate: e.sampleRate, frame_seconds: e.fs, bundle: e.meta.bundle });
+        postMessage({ type: 'ready', provider: e.provider, timing: e.timing, sample_rate: e.sampleRate, frame_seconds: e.fs, bundle: e.meta.bundle });
       })
       .catch((err) => postMessage({ type: 'error', message: String(err && err.message || err) }));
   } else if (d.type === 'reset') {

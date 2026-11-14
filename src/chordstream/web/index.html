@@ -248,7 +248,11 @@ function loadEngine() {
   });
   engineWorker.onerror = (e) => setStatus(`Engine failed to start: ${e.message || 'worker error'}`, 'err');
   engineWorker.postMessage({ type: 'init', provider });
-  engineReady.then((i) => { if (!session) setStatus(`Ready · chord model runs on this device (${i.provider === 'webgpu' ? 'GPU, WebGPU' : 'CPU, WebAssembly'})`); },
+  engineReady.then((i) => {
+    const t = i.timing || {}, f = (x) => (x == null ? null : `${x.toFixed(0)} ms`);
+    const cmp = t.webgpu != null && t.wasm != null ? `; per step GPU ${f(t.webgpu)}, CPU ${f(t.wasm)}` : '';
+    if (!session) setStatus(`Ready · chord model runs on this device (${i.provider === 'webgpu' ? 'GPU, WebGPU' : 'CPU, WebAssembly'}${cmp})`);
+  },
                    (err) => setStatus(`Model failed to load: ${err.message}`, 'err'));
   return engineReady;
 }
@@ -770,7 +774,13 @@ $('file').onchange = () => {
   if (f) start(f, f.name);
 };
 
-$('sys').onclick = () => primeAudio(false) && start(
+// Phones (Android Chrome, iOS Safari) give web pages no screen or audio sharing at all, so a page
+// can't hear other apps there: say so instead of failing with "Cancelled (TypeError)".
+const canShareAudio = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+if (!canShareAudio) $('sys').title = 'Not available in phone browsers';
+$('sys').onclick = () => !canShareAudio
+  ? setStatus(`Phone browsers can't share other apps' audio with a web page. Use Mic, or open the song with Play file.`, 'err')
+  : primeAudio(false) && start(
   () => navigator.mediaDevices.getDisplayMedia({
     video: true,  // Chrome requires a video request; the track is stopped right away
     audio: { ...AUDIO, suppressLocalAudioPlayback: false },

@@ -1003,8 +1003,18 @@ Dates are the day the experiment ran.
   WebGPU (KV caches kept on the GPU between steps): GPU kernel time ~2 ms per step and decisions
   identical to Python (250 frames, max probability error 1.4e-6), but wall time could not be
   measured on this laptop while training held the GPU at 97% (~400 ms per step, waiting behind CUDA).
-  So in auto mode the engine times a few warm-up steps on WebGPU and falls back to WebAssembly when
-  a step takes over 25 ms (a busy GPU), deciding within a few seconds.
+  On a phone (user report): **WebGPU 40 ms per step vs WebAssembly 15 ms.** One step is tiny (one
+  frame, ~2 ms of math, ~150 small kernels), so per-dispatch overhead and the GPU→CPU readback of
+  the probabilities every 40 ms dominate; the CPU has neither. The Windows "GPU %" seen while the
+  page ran was the E40 training job plus the copy engine that hybrid-graphics laptops use to move
+  browser frames to the integrated GPU (the same with the model stopped); the model's own 3D/compute
+  use was ~1%.
+- **Backend choice:** "auto" times 6 steps on each backend (after 3 warm-up steps) and keeps the
+  faster one; the page shows both times. `?provider=webgpu|wasm` forces one.
+- **Phones and system audio:** mobile browsers have no `getDisplayMedia`, so a page cannot hear other
+  apps there. The button now says so (it used to fail with "Cancelled (TypeError)") and points to
+  Mic or Play file.
+- CI runs `tests/web/syntax.mjs` (every inline page script parses) before deploying.
 
 ### D01 · Key-aware chord spelling (display) · 2026-11-12
 - Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`

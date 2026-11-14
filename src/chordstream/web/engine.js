@@ -240,35 +240,45 @@ export class Engine {
     const meta = await (await get('meta.json')).json();
     const [model, state, hmm] = await Promise.all(['model.onnx', 'state.bin', 'hmm.bin']
       .map(async (f) => new Uint8Array(await (await get(f)).arrayBuffer())));
-    // WebGPU first: the KV caches (k_out/v_out, ~10 MB) then stay on the GPU between steps and are
-    // fed straight back in. WebAssembly (CPU) is the fallback when the browser has no WebGPU.
+    // Backends: WebGPU keeps the KV caches (k_out/v_out, ~10 MB) on the GPU between steps;
+    // WebAssembly runs on the CPU. One step is tiny (one frame, ~2 ms of math), so per-dispatch and
+    // GPU->CPU readback overhead can make WebGPU the slower one (measured: phone GPU 40 ms vs CPU
+    // 15 ms per step; a GPU busy with other work is slower still). "auto" times a few steps on
+    // each available backend and keeps the faster.
     const want = opts.provider || 'auto';
-    let sess = null, provider = 'wasm';
-    if (want !== 'wasm' && typeof navigator !== 'undefined' && navigator.gpu) {
+    const make = {
+      webgpu: () => ort.InferenceSession.create(model, {
+        executionProviders: ['webgpu'], graphOptimizationLevel: 'all',
+        preferredOutputLocation: { probs: 'cpu', k_out: 'gpu-buffer', v_out: 'gpu-buffer' },
+      }),
+      wasm: () => ort.InferenceSession.create(model, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' }),
+    };
+    const hasGpu = typeof navigator !== 'undefined' && !!navigator.gpu;
+    let sess, provider, timing = {};
+    if (want === 'wasm' || (want === 'auto' && !hasGpu)) {
+      sess = await make.wasm(); provider = 'wasm';
+    } else if (want === 'webgpu') {
+      sess = await make.webgpu(); provider = 'webgpu';
+    } else {
+      const cpu = await make.wasm();
+      timing.wasm = await Engine.timeSteps(ort, cpu, meta, state, 6);
+      let gpu = null;
       try {
-        sess = await ort.InferenceSession.create(model, {
-          executionProviders: ['webgpu'], graphOptimizationLevel: 'all',
-          preferredOutputLocation: { probs: 'cpu', k_out: 'gpu-buffer', v_out: 'gpu-buffer' },
-        });
-        provider = 'webgpu';
+        gpu = await make.webgpu();
+        // Give up early once a GPU step is clearly slower than the CPU.
+        timing.webgpu = await Engine.timeSteps(ort, gpu, meta, state, 6, 2 * timing.wasm + 5);
       } catch (err) {
-        if (want === 'webgpu') throw err;
         console.warn('WebGPU unavailable, using WebAssembly', err);
       }
-    }
-    if (sess && want === 'auto') {
-      // A GPU busy with other work (a game, training) can make WebGPU far slower than the CPU:
-      // time a few warm-up steps and fall back to WebAssembly if they miss the budget.
-      const ms = await Engine.timeSteps(ort, sess, meta, state, 8, 4 * (opts.gpuBudgetMs || 25));
-      if (ms > (opts.gpuBudgetMs || 25)) {
-        console.warn(`WebGPU too slow here (${ms.toFixed(0)} ms/step), using WebAssembly`);
-        await sess.release?.();
-        sess = null; provider = 'wasm';
+      if (gpu && timing.webgpu < timing.wasm) {
+        await cpu.release?.(); sess = gpu; provider = 'webgpu';
+      } else {
+        await gpu?.release?.(); sess = cpu; provider = 'wasm';
       }
     }
-    if (!sess) sess = await ort.InferenceSession.create(model, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
     const eng = new Engine(ort, sess, meta, state, hmm, opts);
     eng.provider = provider;
+    eng.timing = timing;  // median ms per step of each backend tried ("auto" only)
     return eng;
   }
 
@@ -280,13 +290,13 @@ export class Engine {
     let v = new ort.Tensor('float32', all.slice(all.length / 2), meta.cache_shape);
     const frames = new ort.Tensor('float32', new Float32Array(meta.rf * meta.n_bins), [1, meta.rf, meta.n_bins]);
     const t = [];
-    for (let i = 0; i <= n; i++) {
+    for (let i = 0; i < n + 3; i++) {
       const t0 = performance.now();
       const out = await sess.run({ frames, k_cache: k, v_cache: v });
       const dt = performance.now() - t0;
       if (k.location === 'gpu-buffer') { k.dispose(); v.dispose(); }
       k = out.k_out; v = out.v_out;
-      if (!i) continue;
+      if (i < 3) continue;  // the first steps compile kernels / warm the JIT
       t.push(dt);
       if (dt > giveUpMs) { t.length = 1; t[0] = dt; break; }
     }

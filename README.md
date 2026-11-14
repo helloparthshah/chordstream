@@ -411,10 +411,12 @@ are in [`experiments/`](experiments/).
 
 **https://helloparthshah.github.io/chordstream/** runs everything in the browser: no server, and the
 audio never leaves the device. The model runs on the GPU through WebGPU (Chrome, Edge, recent
-Safari and Firefox), with a WebAssembly (CPU) fallback elsewhere and when the GPU is too busy (it times a few
-steps at load). The page shows which backend is in use and the compute time per 40 ms frame (about
-20 ms on a laptop CPU). Add `?provider=webgpu` or `?provider=wasm` to force one. Mic, system audio and audio files work as in the
-server version, and lyrics come straight from LRCLIB. Not available without the desktop server:
+Safari and Firefox) or on the CPU through WebAssembly, whichever is faster on the device: it times a few steps of
+each at load. One step is so small that the CPU often wins (a phone: CPU 15 ms vs GPU 40 ms per
+40 ms frame; a laptop CPU about 20 ms). The page shows both times and the backend in use; add
+`?provider=webgpu` or `?provider=wasm` to force one. Phone browsers can't share other apps' audio
+with a web page, so on a phone use the mic or play the song as a file in the page. Otherwise mic,
+system audio and audio files work as in the server version, and lyrics come straight from LRCLIB. Not available without the desktop server:
 "now playing" from the OS media session and vocal recognition (Whisper).
 
 - The engine ([`web/engine.js`](src/chordstream/web/engine.js)) is a port of the Python live path:
