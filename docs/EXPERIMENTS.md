@@ -3,7 +3,7 @@
 Every experiment run on chordstream, in order: what was tried, how, what happened and what was
 decided. Each entry is reproducible from the command shown. Batch scripts are in
 [`experiments/`](../experiments/). Model bundles live in `models/` (git-ignored); the ones in
-use are published as [GitHub Releases](https://github.com/helloparthshah/chordstream/releases).
+use are published as [GitHub Releases](https://github.com/helloparthshah/rubato/releases).
 
 **New experiments:** add an entry under [Queue](#queue) before running, then move it into the
 log with its result. One entry per question; record the decision even when the answer is "no gain".
@@ -53,17 +53,17 @@ Comparisons inside one experiment always use the same set. Differences under ~0.
 | bb_ft (first fine-tune) | was live | 73.9% | – | 2.0× | +120 ms | E03–E04 |
 | v2 | was live | 75.5% | 77.0% (19) | 1.9× | +80 ms | E09 |
 | v4 | was live | 78.8% | 80.1% (36 clean) | 1.6× | +80 ms | E15 |
-| v5 | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v5)) | 78.9% | 80.8% (36 clean) | 1.6× | +80 ms | E17 |
-| v6 (extended vocab) | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v6)) | 79.9% | 80.8% (36 clean); 70.3% full vocab | 1.6× | +80 ms | E18 |
+| v5 | was live ([release](https://github.com/helloparthshah/rubato/releases/tag/model-v5)) | 78.9% | 80.8% (36 clean) | 1.6× | +80 ms | E17 |
+| v6 (extended vocab) | was live ([release](https://github.com/helloparthshah/rubato/releases/tag/model-v6)) | 79.9% | 80.8% (36 clean); 70.3% full vocab | 1.6× | +80 ms | E18 |
 | teacher (offline, sees ±5 s) | never | 82.0% | 82.9% (36 clean) | 1.04× | – | E17 |
 | E23b (label delay 240 ms, human labels) | candidate | 83.0% | 83.9% (36 clean) | 1.44× | +240 ms display | E23 |
-| **v12** (v10 recipe + 32 s attention context) | **live** ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v12)) | – | 82.5% majmin, 72.8% full (36 clean); 80.8 / 73.8% without bass < 150 / 300 Hz; inverted 52.8%; **Bollywood 82.4% / 79.8%** (61), 71.6 / 56.5% without bass | 1.36× | 120 ms display | E38 |
-| v11 (v10 + 16 s attention context) | superseded ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v11)) | – | 81.5% majmin, 71.0% full (36 clean); 79.6 / 72.6% without bass < 150 / 300 Hz; inverted 49.7%; **Bollywood 81.0% / 78.4%** (61), 70.5 / 56.9% without bass | 1.56× | 120 ms display | E34b |
-| v10 (v9 + random EQ + bass dropout) | superseded ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v10)) | – | 79.5% majmin, 66.8% full (36 clean); 78.1 / 71.0% without bass < 150 / 300 Hz; **Bollywood 79.1% / 76.5%** (61), 71.9 / 58.5% without bass | 1.68× | 120 ms display | E32b |
-| v9 (v7 recipe + 152 Bollywood songs ×2, cleaned sheet labels) | superseded ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v9)) | 77.1% majmin | 80.2% majmin, 67.7% full (36 clean); **Bollywood 80.0% / 77.4%** (61) | 1.62× | 120 ms display | E28b |
-| v8 (v7 + 47 Bollywood songs, cleaned sheet labels) | superseded ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v8)) | 79.6% majmin | 81.8% majmin, 70.5% full (36 clean); **Bollywood 80.0% / 78.0%** (23) | 1.56× | 120 ms display | E21e |
+| **v12** (v10 recipe + 32 s attention context) | **live** ([release](https://github.com/helloparthshah/rubato/releases/tag/model-v12)) | – | 82.5% majmin, 72.8% full (36 clean); 80.8 / 73.8% without bass < 150 / 300 Hz; inverted 52.8%; **Bollywood 82.4% / 79.8%** (61), 71.6 / 56.5% without bass | 1.36× | 120 ms display | E38 |
+| v11 (v10 + 16 s attention context) | superseded ([release](https://github.com/helloparthshah/rubato/releases/tag/model-v11)) | – | 81.5% majmin, 71.0% full (36 clean); 79.6 / 72.6% without bass < 150 / 300 Hz; inverted 49.7%; **Bollywood 81.0% / 78.4%** (61), 70.5 / 56.9% without bass | 1.56× | 120 ms display | E34b |
+| v10 (v9 + random EQ + bass dropout) | superseded ([release](https://github.com/helloparthshah/rubato/releases/tag/model-v10)) | – | 79.5% majmin, 66.8% full (36 clean); 78.1 / 71.0% without bass < 150 / 300 Hz; **Bollywood 79.1% / 76.5%** (61), 71.9 / 58.5% without bass | 1.68× | 120 ms display | E32b |
+| v9 (v7 recipe + 152 Bollywood songs ×2, cleaned sheet labels) | superseded ([release](https://github.com/helloparthshah/rubato/releases/tag/model-v9)) | 77.1% majmin | 80.2% majmin, 67.7% full (36 clean); **Bollywood 80.0% / 77.4%** (61) | 1.62× | 120 ms display | E28b |
+| v8 (v7 + 47 Bollywood songs, cleaned sheet labels) | superseded ([release](https://github.com/helloparthshah/rubato/releases/tag/model-v8)) | 79.6% majmin | 81.8% majmin, 70.5% full (36 clean); **Bollywood 80.0% / 78.0%** (23) | 1.56× | 120 ms display | E21e |
 | E24 (extended, human labels) | baseline | 80.9% majmin | 81.0% majmin, 70.7% full (36 clean) | 1.71× | +80 ms | E24 |
-| v7 (extended, 120 ms label delay, human labels) | was live ([release](https://github.com/helloparthshah/chordstream/releases/tag/model-v7)) | **83.1%** majmin | **83.3% majmin, 73.0% full (36 clean)** | 1.48× | 120 ms display | E25 |
+| v7 (extended, 120 ms label delay, human labels) | was live ([release](https://github.com/helloparthshah/rubato/releases/tag/model-v7)) | **83.1%** majmin | **83.3% majmin, 73.0% full (36 clean)** | 1.48× | 120 ms display | E25 |
 
 Biggest wins: real data (E03, +28 pts over synthetic only), 16 → 32 s attention context (E34 + E38, +3.1 overall, +9 on inversions), Bollywood songs with cleaned sheet-aligned labels (E21, +11 pts on Bollywood, +4.8 overall), training budget (E13/E15, +2.4),
 a trained-in 120 ms label delay (E23/E25, +2.5 majmin and fewer flips), more data (E08, +2),
@@ -221,7 +221,7 @@ Dates are the day the experiment ran.
   Per type (share of frames, exact chord, right root): maj 66% 84% 86% · min 10% 56% 73% ·
   7 9% 44% 86% · m7 8% 52% 75% · maj7 4% 44% 93% · sus4 3% 11% 64% · dim/aug/sus2 < 0.5% ≈0%.
 - **Decision:** no majmin regression and real 7th recognition, so deployed as **v6** (release
-  [`model-v6`](https://github.com/helloparthshah/chordstream/releases/tag/model-v6)). Sus4 is weak and
+  [`model-v6`](https://github.com/helloparthshah/rubato/releases/tag/model-v6)). Sus4 is weak and
   dim/aug/sus2 are too rare to learn from 331 songs. More data for those qualities (or
   synthetic renders of them) is the lever.
 
@@ -370,7 +370,7 @@ Dates are the day the experiment ran.
   Original 10 (majmin): E25a 83.1% (v6 79.9%). Streaming check on a held-out song: 80.5% per frame
   scored at the described frames (78.5% if the delay were ignored).
 - **Decision:** deployed **E25a** as **v7** (HMM 5 s / power 2; release
-  [`model-v7`](https://github.com/helloparthshah/chordstream/releases/tag/model-v7)): +2.5 pt majmin,
+  [`model-v7`](https://github.com/helloparthshah/rubato/releases/tag/model-v7)): +2.5 pt majmin,
   +2.7 pt full vocabulary and 8% fewer changes than v6, with 120 ms display delay and no distillation.
   E25b is better still but 240 ms late on the live readout; E26 tests getting that accuracy on the
   sheet only.
@@ -516,7 +516,7 @@ Dates are the day the experiment ran.
   leads on in-order coverage, which doesn't use the aligner's timing. E21f learns dim (32% recall)
   at a small cost elsewhere.
 - **Decision:** deployed **E21e** as **v8** (HMM 5 s / power 2; release
-  [`model-v8`](https://github.com/helloparthshah/chordstream/releases/tag/model-v8)): +4.8 pt overall,
+  [`model-v8`](https://github.com/helloparthshah/rubato/releases/tag/model-v8)): +4.8 pt overall,
   +11 pt majmin on Bollywood, −1.5 pt on Billboard (accepted under the selection rule).
 - **Overall (selection rule above, v1 benchmark), majmin:** v7 83.3 / 55.8 → mean **69.6%** (pooled per song
   73.8%); E21a 81.6 / 67.4 → **74.5%** (76.7%); E21b 81.1 / 65.2 → 73.2% (75.6%). E21a leads; final
@@ -584,7 +584,7 @@ Dates are the day the experiment ran.
 - **Decision:** at first kept v8, because E28b's gain is within noise and the aligner-independent
   metrics fell slightly. The user then chose to apply the selection rule as stated (overall accuracy
   up, Billboard drop accepted). **E28b is deployed as v9** (HMM 5 s / power 2, ONNX parity 2.6e-06,
-  release [`model-v9`](https://github.com/helloparthshah/chordstream/releases/tag/model-v9)).
+  release [`model-v9`](https://github.com/helloparthshah/rubato/releases/tag/model-v9)).
   Hand-corrected gold labels should confirm it; if they don't, revert to v8.
 
 ### F04 · Flicker anatomy of v9 (live readout) · 2026-11-12
@@ -1022,9 +1022,9 @@ Dates are the day the experiment ran.
 ### W04 · Renamed Rubato · 2026-11-14
 - The app is now **Rubato** (rubato: expressive, flexible tempo; the app follows real playing).
   Logo "Wave": three chord tones riding a stretched line (`scripts/make_icons.py` -> `web/icons/`:
-  SVG, favicon, home-screen and maskable icons, link-preview image). The repo and site address stay
-  `chordstream` for now (renaming the repo to `rubato` would move the site to
-  helloparthshah.github.io/rubato/); the Python package and CLI keep the name `chordstream`. The site is installable (web manifest) and caches the
+  SVG, favicon, home-screen and maskable icons, link-preview image). The repo moved to
+  `helloparthshah/rubato` and the site to https://helloparthshah.github.io/rubato/ (the old
+  /chordstream/ address no longer resolves); the Python package and CLI keep the name `chordstream`. The site is installable (web manifest) and caches the
   page, engine and model in a service worker, so repeat visits load at once and work offline.
 - Name check (2026-11-14): no chord app called Rubato; nearby is the sequencer "Fugue Machine
   Rubato" (iOS/macOS, 2025), so a store listing would want "Rubato Chords".

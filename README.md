@@ -3,7 +3,7 @@
 # Rubato
 
 Real-time chord recognition from live audio, running entirely in the browser:
-**https://helloparthshah.github.io/chordstream/**. (The Python package and CLI behind it, which train,
+**https://helloparthshah.github.io/rubato/**. (The Python package and CLI behind it, which train,
 evaluate and export the model, are still called `chordstream`.) Each 40 ms of audio produces one decision, computed
 only from audio already heard. The live model (v12) names the chord of the audio 120 ms ago: that
 short, trained-in delay lets each decision hear a little of what follows, which removes much of
@@ -383,7 +383,7 @@ are in [`experiments/`](experiments/).
 
 ## Browser version (GitHub Pages)
 
-**https://helloparthshah.github.io/chordstream/** runs everything in the browser: no server, and the
+**https://helloparthshah.github.io/rubato/** runs everything in the browser: no server, and the
 audio never leaves the device. A CPU / GPU toggle in the model badge picks where the model runs:
 CPU (WebAssembly, the default) or GPU (WebGPU: Chrome, Edge, recent Safari and Firefox). The choice
 is remembered per device. One step is so small that the CPU is often the faster (a phone: CPU 15 ms
