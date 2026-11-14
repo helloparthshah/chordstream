@@ -246,6 +246,8 @@ function loadEngine() {
       else if (m.data.type === 'error') reject(new Error(m.data.message));
     };
   });
+  engineWorker.onerror = (e) => setStatus(`Engine failed to start: ${e.message || 'worker error'}`, 'err');
+  engineWorker.postMessage({ type: 'init', provider });
   engineReady.then((i) => { if (!session) setStatus(`Ready · chord model runs on this device (${i.provider === 'webgpu' ? 'GPU, WebGPU' : 'CPU, WebAssembly'})`); },
                    (err) => setStatus(`Model failed to load: ${err.message}`, 'err'));
   return engineReady;

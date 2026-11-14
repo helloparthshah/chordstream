@@ -5,6 +5,7 @@ usage: python scripts/build_site.py --model <web bundle dir> --ort <onnxruntime-
 The web bundle comes from `chordstream export-web models/vNN --out <dir>` (published as a release asset).
 """
 import argparse
+import hashlib
 import shutil
 from pathlib import Path
 
@@ -25,8 +26,19 @@ html = (WEB / "index.html").read_text(encoding="utf-8")
 html = html.replace("<head>", "<head>\n<script>window.CHORDSTREAM_LOCAL = true;</script>", 1)
 (out / "index.html").write_text(html, encoding="utf-8")
 (out / "bench.html").write_text((WEB / "bench.html").read_text(encoding="utf-8"), encoding="utf-8")
+# Cache-busting: browsers (and Pages' 10-minute cache) must never pair a new page with an old engine.
+ver = hashlib.sha1(b"".join((WEB / f).read_bytes() for f in STATIC) + (Path(a.model) / "meta.json").read_bytes()).hexdigest()[:10]
 for f in STATIC:
-    shutil.copyfile(WEB / f, out / "static" / f)
+    text = (WEB / f).read_text(encoding="utf-8")
+    if f == "engine-worker.js":
+        text = text.replace("'./engine.js'", f"'./engine.js?v={ver}'")
+    (out / "static" / f).write_text(text, encoding="utf-8")
+html = (out / "index.html").read_text(encoding="utf-8")
+for f in STATIC:
+    html = html.replace(f"static/{f}'", f"static/{f}?v={ver}'").replace(f'static/{f}"', f'static/{f}?v={ver}"')
+(out / "index.html").write_text(html, encoding="utf-8")
+bench = (out / "bench.html").read_text(encoding="utf-8").replace("'./static/engine.js'", f"'./static/engine.js?v={ver}'")
+(out / "bench.html").write_text(bench, encoding="utf-8")
 for f in ORT:
     shutil.copyfile(Path(a.ort) / f, out / "ort" / f)
 if Path(a.model).resolve() != (out / "model").resolve():

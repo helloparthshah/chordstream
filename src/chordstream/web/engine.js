@@ -256,10 +256,42 @@ export class Engine {
         console.warn('WebGPU unavailable, using WebAssembly', err);
       }
     }
+    if (sess && want === 'auto') {
+      // A GPU busy with other work (a game, training) can make WebGPU far slower than the CPU:
+      // time a few warm-up steps and fall back to WebAssembly if they miss the budget.
+      const ms = await Engine.timeSteps(ort, sess, meta, state, 8, 4 * (opts.gpuBudgetMs || 25));
+      if (ms > (opts.gpuBudgetMs || 25)) {
+        console.warn(`WebGPU too slow here (${ms.toFixed(0)} ms/step), using WebAssembly`);
+        await sess.release?.();
+        sess = null; provider = 'wasm';
+      }
+    }
     if (!sess) sess = await ort.InferenceSession.create(model, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
     const eng = new Engine(ort, sess, meta, state, hmm, opts);
     eng.provider = provider;
     return eng;
+  }
+
+  // Median wall time of n steps from the start state (the first, compile-heavy step excluded);
+  // stops early, returning that step's time, as soon as one step exceeds giveUpMs.
+  static async timeSteps(ort, sess, meta, stateBytes, n, giveUpMs = Infinity) {
+    const all = new Float32Array(stateBytes.buffer, stateBytes.byteOffset, stateBytes.byteLength / 4);
+    let k = new ort.Tensor('float32', all.slice(0, all.length / 2), meta.cache_shape);
+    let v = new ort.Tensor('float32', all.slice(all.length / 2), meta.cache_shape);
+    const frames = new ort.Tensor('float32', new Float32Array(meta.rf * meta.n_bins), [1, meta.rf, meta.n_bins]);
+    const t = [];
+    for (let i = 0; i <= n; i++) {
+      const t0 = performance.now();
+      const out = await sess.run({ frames, k_cache: k, v_cache: v });
+      const dt = performance.now() - t0;
+      if (k.location === 'gpu-buffer') { k.dispose(); v.dispose(); }
+      k = out.k_out; v = out.v_out;
+      if (!i) continue;
+      t.push(dt);
+      if (dt > giveUpMs) { t.length = 1; t[0] = dt; break; }
+    }
+    if (k.location === 'gpu-buffer') { k.dispose(); v.dispose(); }
+    return t.sort((a, b) => a - b)[t.length >> 1];
   }
 
   constructor(ort, sess, meta, stateBytes, hmmBytes, { sheetMinFrames = 12, displayHold = 20, displayThr = 0.05 } = {}) {

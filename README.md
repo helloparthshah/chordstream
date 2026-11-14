@@ -411,8 +411,9 @@ are in [`experiments/`](experiments/).
 
 **https://helloparthshah.github.io/chordstream/** runs everything in the browser: no server, and the
 audio never leaves the device. The model runs on the GPU through WebGPU (Chrome, Edge, recent
-Safari and Firefox), with a WebAssembly (CPU) fallback elsewhere. The page shows which backend is in
-use and the compute time per 40 ms frame. Mic, system audio and audio files work as in the
+Safari and Firefox), with a WebAssembly (CPU) fallback elsewhere and when the GPU is too busy (it times a few
+steps at load). The page shows which backend is in use and the compute time per 40 ms frame (about
+20 ms on a laptop CPU). Add `?provider=webgpu` or `?provider=wasm` to force one. Mic, system audio and audio files work as in the
 server version, and lyrics come straight from LRCLIB. Not available without the desktop server:
 "now playing" from the OS media session and vocal recognition (Whisper).
 

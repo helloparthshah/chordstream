@@ -999,8 +999,12 @@ Dates are the day the experiment ran.
   natively. The streaming step ran the CNN over all 13 input frames although only the newest
   output is used; `StreamingStep.embed_last` now computes just that frame's cone (13 → 9 → 5 → 1
   frames per block; identical output, about 3.5x less CNN work). WebAssembly then: 33 ms per frame in
-  Node, **21 ms in Chromium**, inside the 40 ms budget. WebGPU: GPU kernel time ~2 ms per step,
-  KV caches kept on the GPU between steps.
+  Node, **21 ms in Chromium** (18.5 ms in the page while playing a file), inside the 40 ms budget.
+  WebGPU (KV caches kept on the GPU between steps): GPU kernel time ~2 ms per step and decisions
+  identical to Python (250 frames, max probability error 1.4e-6), but wall time could not be
+  measured on this laptop while training held the GPU at 97% (~400 ms per step, waiting behind CUDA).
+  So in auto mode the engine times a few warm-up steps on WebGPU and falls back to WebAssembly when
+  a step takes over 25 ms (a busy GPU), deciding within a few seconds.
 
 ### D01 · Key-aware chord spelling (display) · 2026-11-12
 - Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`
