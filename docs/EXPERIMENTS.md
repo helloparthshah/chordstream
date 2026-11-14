@@ -985,6 +985,25 @@ Dates are the day the experiment ran.
   (~22 h)**, train-only prefix `choco`. Most remaining rejects fail the drift check (JAAH jazz takes).
 - **Next:** E40 = v12's recipe + these 444 songs ([`2026-11-13_choco.ps1`](../experiments/2026-11-13_choco.ps1)).
 
+### E40 / E40b · +444 songs (ChoCo + recovered Billboard) · 2026-11-14 — `models/e40_choco`, `models/e40b_bolly52`
+- **Scripts:** [`2026-11-13_choco.ps1`](../experiments/2026-11-13_choco.ps1) (E40: v12's recipe on
+  `data/cache_ext_bolly3x2_choco`), [`2026-11-14_bolly_share.ps1`](../experiments/2026-11-14_bolly_share.ps1)
+  (E40b: same, with `--share bollytrain=0.52` so Bollywood keeps v12's 52% of training crops; E40's
+  duration weighting had dropped it to 32%).
+
+  | majmin | BB clean | BB no bass < 150 / < 300 | inverted | Bolly clean | Bolly no bass < 150 / < 300 | **overall** | changes |
+  |---|---|---|---|---|---|---|---|
+  | v12 | 82.5% | 80.8 / 73.8% | 52.8% | 82.4% | 71.6 / 56.5% | **82.5%** | 1.36× |
+  | E40 | 83.2% | 82.0 / 75.7% | 56.6% | 80.0% | 71.9 / 58.3% | 81.6% | 1.21× |
+  | E40b | 82.5% | 81.0 / 74.7% | 53.8% | 81.5% | 71.8 / 57.7% | 82.0% | 1.32× |
+
+- **Findings:** the extra Western songs help Billboard (+0.7, +3.8 on inversions) but cost Bollywood
+  (−2.4). Restoring Bollywood's share recovers only part of that (−0.9) and gives back the Billboard
+  gain: at this model size and training budget, more Western data competes with Bollywood rather
+  than adding to it.
+- **Decision:** neither deployed; v12 stays live. Possible follow-ups: a longer schedule (more data
+  at the same epochs means fewer passes per song) or a larger model.
+
 ### W01 · Browser-only version (GitHub Pages) · 2026-11-13
 - **What:** the live engine ported to JavaScript ([`web/engine.js`](../src/chordstream/web/engine.js)):
   causal CQT, ONNX step model through onnxruntime-web (WebGPU, WebAssembly fallback) in a Web Worker,
@@ -1121,6 +1140,8 @@ Dates are the day the experiment ran.
 | `v11` | E34b | previous live model, release `model-v11` (= `e34b_ctx400_eq` + HMM 5 s / power 2) |
 | `e38_ctx800` (+ `_h5p2`) | E38 | 32 s context; = v12 |
 | `e39_ctx1600` (+ `_h5p2`) | E39 | 64 s context; +0.5 pt, not deployed (cost) |
+| `e40_choco` (+ `_h5p2`) | E40 | +444 songs; 81.6% overall, not deployed |
+| `e40b_bolly52` (+ `_h5p2`) | E40b | E40 with Bollywood share pinned at 52%; 82.0% overall, not deployed |
 | `e35_tune`, `e35b_tune25` (+ `_h5p2`) | E35 | detuned training copies; not deployed |
 | `e36a_early1`, `e36b_early3` (+ `_h5p2`) | E36 | early-switch penalty; not deployed |
 | `e37a_bins24`, `e37b_bins36`, `e37c_bins36_micro` (+ `_h5p2`) | E37 | small 36-bin pilot; safe to delete |
