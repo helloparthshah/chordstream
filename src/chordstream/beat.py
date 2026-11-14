@@ -150,3 +150,37 @@ def change_scale(state: BeatState, lag: float, window: float, suppress: float) -
     boost = (1.0 - (1.0 - frac) * suppress) / frac
     g = boost if dist <= window else suppress
     return (1.0 - state.confidence) + state.confidence * g
+
+
+# ---------------------------------------------------------------- E42: beat phase as a model input
+BEAT_FEATS = 3  # conf * sin(2 pi phase), conf * cos(2 pi phase), conf
+BEAT_CACHE = "data/beat_cache"
+
+
+def beat_vector(state: BeatState) -> np.ndarray:
+    """One frame's beat input: the phase on the unit circle (so 0.99 and 0.0 are neighbours), scaled
+    by the tracker's confidence, plus the confidence itself (so the model can ignore an unlocked tracker)."""
+    a = 2 * np.pi * (state.phase / state.period if state.period > 0 else 0.0)
+    c = state.confidence
+    return np.array([c * np.sin(a), c * np.cos(a), c], np.float32)
+
+
+def beat_features(feats: np.ndarray) -> np.ndarray:
+    """(T, F) CQT frames -> (T, 3) causal beat inputs, exactly as the live engine computes them."""
+    bt = BeatTracker()
+    return np.stack([beat_vector(bt.step(f)) for f in np.asarray(feats, np.float32)]) if len(feats) else np.zeros((0, BEAT_FEATS), np.float32)
+
+
+def cached_beat_features(path, feats: np.ndarray) -> np.ndarray:
+    """beat_features, cached on disk per cache file (data/beat_cache/<stem>.npy)."""
+    from pathlib import Path
+
+    p = Path(BEAT_CACHE) / f"{Path(path).stem}.npy"
+    if p.exists():
+        b = np.load(p)
+        if len(b) == len(feats):
+            return b
+    b = beat_features(feats)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    np.save(p, b)
+    return b

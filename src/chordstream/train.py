@@ -111,6 +111,9 @@ def structured_loss(out: dict, aux: torch.Tensor) -> torch.Tensor:
 def predict_song(net: ChordNet, feats: np.ndarray, device, chunk: int = 1024, head: str = "chord") -> np.ndarray:
     """Posteriors aligned to the frames they describe (a label-delay model's output t is frame t - d).
     head="sheet" reads the E26 sheet head instead (delay sheet_delay)."""
+    if getattr(net.cfg, "beat_input", False) and feats.shape[1] == net.cfg.n_bins:  # E42: add causal beat inputs
+        from .beat import beat_features
+        feats = np.concatenate([feats.astype(np.float32), beat_features(feats)], axis=1)
     probs = _predict_song(net, feats, device, chunk, head)
     d = getattr(net.cfg, "sheet_delay" if head == "sheet" else "label_delay", 0)
     if d > 0:
@@ -225,6 +228,7 @@ def train(
     early_window_s: float = 0.5,
     micro_shift: bool = False,
     tune_share: float = 0.0,
+    shares: dict | None = None,
 ) -> Path:
     if seed is not None:
         torch.manual_seed(seed)
@@ -239,6 +243,7 @@ def train(
             bundle.model.n_classes = model_cfg.n_classes
             bundle.model.structured = model_cfg.structured
             bundle.model.key_input = model_cfg.key_input
+            bundle.model.beat_input = model_cfg.beat_input
             bundle.model.label_delay = model_cfg.label_delay
             bundle.model.sheet_delay = model_cfg.sheet_delay
             bundle.model.context_frames = model_cfg.context_frames  # E34: ALiBi, so the band can change
@@ -254,7 +259,8 @@ def train(
     print(f"train songs: {len(train_files)}  val songs: {len(val_files)}  device: {dev}")
     ds = CropDataset(train_files, crop, fcfg.bins_per_semitone, augment=True, crops_per_epoch=crops_per_epoch,
                      n_classes=mcfg.n_classes, bass_dropout=bass_dropout, random_eq=random_eq,
-                     micro_shift=micro_shift, tune_share=tune_share)
+                     micro_shift=micro_shift, tune_share=tune_share, shares=shares,
+                     beat=mcfg.beat_input)
     dl = DataLoader(ds, batch_size=batch_size, shuffle=True, num_workers=workers, collate_fn=_collate,
                     drop_last=True, persistent_workers=workers > 0)
 

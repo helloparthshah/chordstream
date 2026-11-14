@@ -158,9 +158,11 @@ class CropDataset:
 
     def __init__(self, files, crop: int, bins_per_semitone: int, augment: bool, crops_per_epoch: int, seed: int = 0,
                  n_classes: int = N_CLASSES, bass_dropout: float = 0.0, random_eq: float = 0.0,
-                 micro_shift: bool = False, tune_share: float = 0.0):
+                 micro_shift: bool = False, tune_share: float = 0.0, shares: dict[str, float] | None = None,
+                 beat: bool = False):
         self.songs = []
-        is_tune = []
+        self.beats = [] if beat else None  # E42: causal beat features per song, appended after augmentation
+        is_tune, prefixes = [], []
         self.n_classes = n_classes
         for f in files:
             d = np.load(f)
@@ -174,7 +176,11 @@ class CropDataset:
                 feats = d["feats"]  # kept as stored (float16): crops are converted on read, halving RAM
                 self.songs.append((feats if feats.dtype == np.float16 else feats.astype(np.float32),
                                    d["labels"].astype(np.int64), soft, aux))
+                if beat:
+                    from ..beat import cached_beat_features
+                    self.beats.append(cached_beat_features(f, d["feats"]))
                 is_tune.append(Path(f).name.startswith("tunex__"))
+                prefixes.append(Path(f).name.split("__")[0])
         if not self.songs:
             raise ValueError("no songs found for dataset")
         lengths = np.array([len(s[1]) for s in self.songs], dtype=np.float64)
@@ -183,6 +189,18 @@ class CropDataset:
         if tune_share > 0 and tune.any() and (~tune).any():  # E35b: detuned copies get this share of the crops
             self.weights[tune] *= tune_share / self.weights[tune].sum()
             self.weights[~tune] *= (1 - tune_share) / self.weights[~tune].sum()
+        if shares:  # E40b: fixed share of crops per file prefix (e.g. bollytrain=0.52); the rest by duration
+            pre = np.array(prefixes)
+            fixed = np.zeros(len(pre), bool)
+            for prefix, frac in shares.items():
+                sel = pre == prefix
+                if sel.any():
+                    self.weights[sel] *= frac / self.weights[sel].sum()
+                    fixed |= sel
+            rest = 1 - sum(f for p_, f in shares.items() if (pre == p_).any())
+            if (~fixed).any():
+                self.weights[~fixed] *= rest / self.weights[~fixed].sum()
+            self.weights /= self.weights.sum()
         self.crop, self.bps, self.augment, self.n = crop, bins_per_semitone, augment, crops_per_epoch
         self.seed = seed
         self.bass_dropout = bass_dropout  # E31: share of crops with the low register removed
@@ -194,8 +212,10 @@ class CropDataset:
 
     def __getitem__(self, i: int):
         rng = np.random.default_rng((self.seed, i, np.random.randint(1 << 30) if self.augment else 0))
-        feats, labels, soft, aux_all = self.songs[rng.choice(len(self.songs), p=self.weights)]
+        j = rng.choice(len(self.songs), p=self.weights)
+        feats, labels, soft, aux_all = self.songs[j]
         T = len(labels)
+        s = 0
         q = np.zeros((self.crop, self.n_classes), np.float32)  # all-zero rows = no soft target
         aux = np.tile(np.array([IGNORE, IGNORE, -1], np.int64), (self.crop, 1))
         if T >= self.crop:
@@ -246,6 +266,13 @@ class CropDataset:
             if rng.random() < 0.5:  # frequency masking
                 f0 = int(rng.integers(0, nb - 6 * self.bps))
                 x[:, f0 : f0 + int(rng.integers(1, 6 * self.bps))] = 0
+        if self.beats is not None:  # beat phase doesn't move with pitch shifts or EQ: append after augmenting
+            b = np.zeros((self.crop, self.beats[j].shape[1]), np.float32)
+            if T >= self.crop:
+                b[:] = self.beats[j][s : s + self.crop]
+            else:
+                b[-T:] = self.beats[j]
+            x = np.concatenate([x, b], axis=1)
         return x, y, q, aux
 
 

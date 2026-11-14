@@ -135,6 +135,39 @@ def test_streaming_step_matches_full_forward():
     torch.testing.assert_close(torch.stack(outs[P:]), full, atol=1e-5, rtol=1e-4)
 
 
+def test_beat_input_streaming_matches_full_forward_and_features_are_causal():
+    """E42: with beat inputs the KV-cache step still equals the full forward pass, and a frame's beat
+    features never depend on later frames."""
+    torch = pytest.importorskip("torch")
+    from chordstream.beat import beat_features
+    from chordstream.config import ModelConfig
+    from chordstream.model import ChordNet, StreamingStep, receptive_field_cnn
+
+    rng = np.random.default_rng(0)
+    feats = rng.random((300, 144)).astype(np.float32) * 3
+    b = beat_features(feats)
+    assert b.shape == (300, 3) and np.allclose(beat_features(feats[:200]), b[:200])  # causal
+    cfg = ModelConfig(d_model=64, n_layers=2, n_heads=4, context_frames=8, beat_input=True)
+    torch.manual_seed(0)
+    net = ChordNet(cfg).eval()
+    torch.nn.init.normal_(net.beat_proj.weight)  # non-zero, so the beat path is exercised
+    step = StreamingStep(net).eval()
+    rf = receptive_field_cnn(cfg)
+    P = cfg.n_layers * cfg.context_frames + rf
+    x = torch.from_numpy(np.concatenate([feats[:40], b[:40]], 1))[None]
+    seq = torch.cat([torch.zeros(1, P, 147), x], dim=1)
+    with torch.no_grad():
+        full = torch.softmax(net(seq), -1)[0, P:]
+        k, v = torch.zeros(net.cache_shape()), torch.zeros(net.cache_shape())
+        win = torch.zeros(1, rf, 147)
+        outs = []
+        for t in range(seq.shape[1]):
+            win = torch.cat([win[:, 1:], seq[:, t : t + 1]], dim=1)
+            p, k, v = step(win, k, v)
+            outs.append(p[0])
+    torch.testing.assert_close(torch.stack(outs[P:]), full, atol=1e-5, rtol=1e-4)
+
+
 def test_sheet_head_streaming_and_predict():
     """E26: the streaming step's sheet output equals the full forward pass of the sheet head, and
     predict_song(head="sheet") realigns by sheet_delay."""

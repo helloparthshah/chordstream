@@ -107,12 +107,13 @@ def cmd_train(a):
     ext = a.vocab == "extended"
     fcfg = FrontendConfig(gamma=a.gamma, bins_per_octave=a.bins_per_octave, n_bins=6 * a.bins_per_octave)
     mcfg = ModelConfig(context_frames=a.context, d_model=a.d_model, n_layers=a.layers, n_bins=fcfg.n_bins,
-                       n_classes=N_EXT if ext else N_CLASSES, structured=ext or a.structured, key_input=a.key_input,
+                       n_classes=N_EXT if ext else N_CLASSES, structured=ext or a.structured, key_input=a.key_input, beat_input=a.beat_input,
                        label_delay=a.label_delay, sheet_delay=a.sheet_delay)
     train(a.cache, a.out, a.epochs, a.batch_size, a.lr, a.crops, a.init, a.progressions, a.holdout_prefix,
           a.workers, a.device, mcfg, a.transition_weight, a.transition_window, a.seed, fcfg,
           a.eval_every, a.bidirectional, a.distill_weight, a.aux_weight, a.stability_weight, a.bass_dropout, a.random_eq,
-          a.early_weight, a.early_window, a.micro_shift, a.tune_share)
+          a.early_weight, a.early_window, a.micro_shift, a.tune_share,
+          {k: float(v) for k, v in (x.split('=') for x in a.share)} or None)
 
 
 def cmd_export(a):
@@ -368,6 +369,9 @@ def main(argv=None):
     s.add_argument("--bins-per-octave", type=int, default=24, help="CQT resolution (fresh models only; E37: 36)")
     s.add_argument("--tune-share", type=float, default=0.0,
                    help="share of training crops drawn from detuned tunex__ copies (0 = by duration, E35b)")
+    s.add_argument("--beat-input", action="store_true", help="E42: causal beat phase as a Transformer input")
+    s.add_argument("--share", action="append", default=[], metavar="PREFIX=FRAC",
+                   help="E40b: fixed share of training crops for files with this prefix, e.g. bollytrain=0.52 (repeatable)")
     s.add_argument("--micro-shift", action="store_true", help="random +-1 sub-semitone bin shift, labels kept (E37)")
     s.add_argument("--early-weight", type=float, default=0.0,
                    help="weight of the early-switch penalty: -log(1 - p(next chord)) before each change (E36)")

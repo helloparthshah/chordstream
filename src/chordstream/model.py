@@ -125,6 +125,10 @@ class ChordNet(nn.Module):
             self.sheet_head = nn.Linear(cfg.d_model, cfg.n_classes)
         if cfg.key_input:
             self.key_proj = nn.Linear(12, cfg.d_model)
+        if cfg.beat_input:  # E42: beat phase joins after the CNN (it is not a pitch), projected and added
+            self.beat_proj = nn.Linear(3, cfg.d_model)
+            nn.init.zeros_(self.beat_proj.weight)  # starts as a no-op: the init model's behaviour is kept
+            nn.init.zeros_(self.beat_proj.bias)
         if cfg.structured:
             self.root_head = nn.Linear(cfg.d_model, 13)  # 12 pitch classes + "no chord"
             self.bass_head = nn.Linear(cfg.d_model, 13)
@@ -148,6 +152,8 @@ class ChordNet(nn.Module):
         h = self.proj(h.permute(0, 2, 1, 3).reshape(B, T, -1))
         if self.cfg.key_input:  # columns after the CQT bins: key-signature vector (E20)
             h = h + self.key_proj(x[:, :, nb : nb + 12])
+        if self.cfg.beat_input:  # last 3 columns: causal beat phase (E42)
+            h = h + self.beat_proj(x[:, :, -3:])
         return h
 
     def features(self, x: torch.Tensor) -> torch.Tensor:
@@ -200,7 +206,10 @@ class StreamingStep(nn.Module):
         for blk in net.cnn:
             h = blk.forward_valid(h)
         B, C, T, Fq = h.shape
-        return net.proj(h.permute(0, 2, 1, 3).reshape(B, T, C * Fq))
+        h = net.proj(h.permute(0, 2, 1, 3).reshape(B, T, C * Fq))
+        if net.cfg.beat_input:
+            h = h + net.beat_proj(frames[:, -1:, -3:])
+        return h
 
     def forward(self, frames, k_cache, v_cache):
         h = self.embed_last(frames) if not self.net.cfg.bidirectional and not self.net.cfg.key_input             else self.net.embed(frames)[:, -1:]
