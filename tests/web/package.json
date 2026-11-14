@@ -1,0 +1,7 @@
+{
+  "name": "chordstream-web-tests",
+  "private": true,
+  "type": "module",
+  "scripts": { "parity": "node parity.mjs ../../data/webtest ../../site/model" },
+  "devDependencies": { "onnxruntime-web": "1.20.1" }
+}

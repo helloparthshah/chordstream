@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chordstream benchmark</title>
+<style>
+  :root { --bg: #f6f5f2; --fg: #1a1917; --muted: #77736b; --line: #e3e0d9; --good: #16a34a; --bad: #dc2626; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0d0e12; --fg: #eceef3; --muted: #8b90a0; --line: #262a35; --good: #34d399; --bad: #f87171; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+  td, th { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; font-variant-numeric: tabular-nums; }
+  .ok { color: var(--good); } .bad { color: var(--bad); } .muted { color: var(--muted); }
+  button { font: inherit; padding: 6px 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Engine benchmark</h1>
+  <p class="muted">Runs the chord model in this browser on the GPU (WebGPU) and on the CPU (WebAssembly).
+    A frame must take under 40 ms to keep up with live audio. When a reference recording is present
+    (local builds, <code>test/</code>), it also checks every decision against the Python engine.</p>
+  <button id="go">Run</button>
+  <table><thead><tr><th>Backend</th><th>Load</th><th>ms / frame</th><th>p95</th><th>vs Python</th></tr></thead><tbody id="rows"></tbody></table>
+  <pre id="log" class="muted"></pre>
+</main>
+<script type="module">
+import * as ort from './ort/ort.webgpu.min.mjs';
+import { Engine } from './static/engine.js';
+ort.env.wasm.wasmPaths = new URL('./ort/', location.href).href;
+ort.env.wasm.numThreads = 1;
+const $ = (id) => document.getElementById(id);
+const log = (s) => { $('log').textContent += s + '\n'; };
+const FIELDS = ['index', 'display_name', 'name', 'beat_name', 'key'];
+
+async function reference() {
+  try {
+    const [r, a] = await Promise.all([fetch('test/ref.json'), fetch('test/audio.f32')]);
+    if (!r.ok || !a.ok) return null;
+    return { ref: await r.json(), audio: new Float32Array(await a.arrayBuffer()) };
+  } catch { return null; }
+}
+
+async function run(provider, test) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>${provider}</td><td colspan="4" class="muted">running…</td>`;
+  $('rows').append(tr);
+  try {
+    const t0 = performance.now();
+    const eng = await Engine.load(ort, 'model/', { provider });
+    const load = performance.now() - t0;
+    if (eng.provider !== provider) throw new Error(`not available (fell back to ${eng.provider})`);
+    const audio = test ? test.audio : Float32Array.from({ length: 16000 * 20 }, (_, i) => Math.sin(i * 0.05) * 0.3 + (Math.random() - 0.5) * 0.05);
+    const events = [];
+    for (let s = 0; s < audio.length; s += 1000) {
+      events.push(...await eng.push(audio.slice(s, s + 1000)));
+    }
+    const ms = eng.computeMs.slice(25);  // skip warm-up
+    const mean = ms.reduce((a, b) => a + b, 0) / ms.length;
+    const p95 = [...ms].sort((a, b) => a - b)[Math.floor(ms.length * 0.95)];
+    let parity = '<span class="muted">no reference</span>';
+    if (test) {
+      const bad = {};
+      let perr = 0;
+      events.forEach((e, i) => {
+        const r = test.ref.events[i];
+        if (!r) return;
+        for (const f of FIELDS) if (e[f] !== r[f]) bad[f] = (bad[f] || 0) + 1;
+        for (let j = 0; j < e.probs.length; j++) perr = Math.max(perr, Math.abs(e.probs[j] - test.ref.probs[i][j]));
+      });
+      const n = Object.values(bad).reduce((a, b) => a + b, 0);
+      parity = `<span class="${n ? 'bad' : 'ok'}">${n ? Object.entries(bad).map(([k, v]) => `${k}: ${v}`).join(', ') + ` of ${events.length}` : `identical (${events.length} frames)`}</span> · max prob err ${perr.toExponential(1)}`;
+    }
+    tr.innerHTML = `<td>${provider}</td><td>${(load / 1000).toFixed(1)} s</td><td class="${mean < 40 ? 'ok' : 'bad'}">${mean.toFixed(2)}</td><td>${p95.toFixed(2)}</td><td>${parity}</td>`;
+    window.benchResults = { ...(window.benchResults || {}), [provider]: { mean, p95, parity: tr.lastChild.textContent } };
+  } catch (err) {
+    tr.innerHTML = `<td>${provider}</td><td colspan="4" class="bad">${err.message || err}</td>`;
+    window.benchResults = { ...(window.benchResults || {}), [provider]: { error: String(err.message || err) } };
+  }
+}
+
+$('go').onclick = async () => {
+  $('go').disabled = true; $('rows').replaceChildren(); $('log').textContent = '';
+  log(`WebGPU: ${navigator.gpu ? 'available' : 'not available in this browser'}`);
+  if (navigator.gpu) { try { const ad = await navigator.gpu.requestAdapter(); const info = ad && (ad.info || await ad.requestAdapterInfo?.()); log(`GPU: ${info ? [info.vendor, info.architecture, info.description].filter(Boolean).join(' ') : 'no adapter'}`); } catch {} }
+  const test = await reference();
+  log(test ? `reference: ${test.ref.events.length} frames` : 'no reference recording: timing only');
+  await run('webgpu', test);
+  await run('wasm', test);
+  window.benchDone = true;
+  $('go').disabled = false;
+};
+if (location.hash === '#run') $('go').click();
+</script>
+</body>
+</html>

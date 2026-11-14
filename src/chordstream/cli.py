@@ -42,6 +42,17 @@ def cmd_fetch_billboard(a):
                     a.cookies_from_browser)
 
 
+def cmd_fetch_choco(a):
+    from .data.choco import load_choco_catalog
+    from .data.youtube import fetch_catalog, load_catalog
+
+    bb = {(e.artist, e.title) for e in load_catalog(a.billboard_raw)}  # never duplicate Billboard songs
+    cat = load_choco_catalog(a.choco, a.out + "/_labs", exclude=bb)
+    print(f"{len(cat)} ChoCo songs with chord labels (Billboard duplicates removed)")
+    fetch_catalog(cat, a.out, a.limit, a.tolerance, a.min_score, a.min_margin, a.max_drift, a.sleep,
+                  a.cookies_from_browser)
+
+
 def cmd_synth(a):
     from .data.synth import builtin_progressions, render_dataset, render_rare_dataset
     from .data.ug import load_progressions
@@ -108,6 +119,12 @@ def cmd_export(a):
     from .export import export_onnx
 
     export_onnx(a.bundle)
+
+
+def cmd_export_web(a):
+    from .export import export_web
+
+    export_web(a.bundle, a.out)
 
 
 def cmd_transcribe(a):
@@ -295,6 +312,19 @@ def main(argv=None):
     s.add_argument("--cookies-from-browser", help="e.g. firefox: use that browser's YouTube session")
     s.set_defaults(fn=cmd_fetch_billboard)
 
+    s = sp.add_parser("fetch-choco", help="E40: download + auto-align audio for ChoCo's Isophonics/USPop/RW/JAAH labels")
+    s.add_argument("--choco", default="data/choco", help="ChoCo checkout (partitions/*/choco)")
+    s.add_argument("--billboard-raw", default="data/billboard_raw")
+    s.add_argument("--out", default="data/choco_audio")
+    s.add_argument("--limit", type=int)
+    s.add_argument("--tolerance", type=float, default=4.0)
+    s.add_argument("--min-score", type=float, default=0.2)
+    s.add_argument("--min-margin", type=float, default=0.08)
+    s.add_argument("--max-drift", type=float, default=0.3)
+    s.add_argument("--sleep", type=float, default=2.0)
+    s.add_argument("--cookies-from-browser")
+    s.set_defaults(fn=cmd_fetch_choco)
+
     s = sp.add_parser("synth", help="render progressions into labelled training audio")
     s.add_argument("--progressions", help="jsonl from ug-parse (default: built-in bank)")
     s.add_argument("--out", default="data/synth")
@@ -409,6 +439,11 @@ def main(argv=None):
     s = sp.add_parser("export", help="export bundle to ONNX (+ parity check)")
     s.add_argument("bundle", nargs="?", default="models/latest")
     s.set_defaults(fn=cmd_export)
+
+    s = sp.add_parser("export-web", help="write a bundle for the in-browser engine (GitHub Pages site)")
+    s.add_argument("bundle", nargs="?", default="models/v12")
+    s.add_argument("--out", default="site/model")
+    s.set_defaults(fn=cmd_export_web)
 
     s = sp.add_parser("transcribe", help="run the live engine over a file (simulated stream)")
     s.add_argument("audio")

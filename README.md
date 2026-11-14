@@ -238,7 +238,8 @@ gh release download model-v12 --pattern "*.zip" --dir models
 Expand-Archive models/chordstream-v12.zip models; uv run chordstream serve --bundle models/v12
 ```
 
-They were trained on copyrighted recordings, so keep them for personal use.
+They were trained on copyrighted recordings, so keep them for personal use. The browser-only site
+loads `chordstream-v12-web.zip` from the same release.
 
 ## Workflow
 
@@ -406,6 +407,33 @@ first fine-tuned model scored 73.8% on Billboard's original 10. A step costs abo
 **[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)**, with commands and decisions. The batch scripts
 are in [`experiments/`](experiments/).
 
+## Browser-only version (GitHub Pages)
+
+**https://helloparthshah.github.io/chordstream/** runs everything in the browser: no server, and the
+audio never leaves the device. The model runs on the GPU through WebGPU (Chrome, Edge, recent
+Safari and Firefox), with a WebAssembly (CPU) fallback elsewhere. The page shows which backend is in
+use and the compute time per 40 ms frame. Mic, system audio and audio files work as in the
+server version, and lyrics come straight from LRCLIB. Not available without the desktop server:
+"now playing" from the OS media session and vocal recognition (Whisper).
+
+- The engine ([`web/engine.js`](src/chordstream/web/engine.js)) is a port of the Python live path:
+  causal CQT, the ONNX step model (onnxruntime-web, in a Web Worker), causal HMM, beat tracker, key
+  spelling, chord sheet and Steady display. On 90 s of a test song, every decision is identical to the
+  Python engine (`tests/web/parity.mjs`).
+- `bench.html` on the site times both backends on your device.
+- Deploy: `.github/workflows/pages.yml` builds the site on every push that touches `src/chordstream/web/`.
+  To ship a new model, export the web bundle and attach it to that model's release, then set
+  `WEB_MODEL` in the workflow:
+
+```powershell
+uv run chordstream export-web models/v12 --out site/model   # also re-exports the ONNX step model
+# zip meta.json, model.onnx, state.bin, hmm.bin -> chordstream-v12-web.zip, then:
+gh release upload model-v12 site/chordstream-v12-web.zip
+```
+
+Local test build: `cd tests/web; npm ci; npm run parity` (needs `tests/web/make_reference.py` output in
+`data/webtest`), then `python scripts/build_site.py --model site/model --out _site` and serve `_site`.
+
 ## Using it from other devices on your LAN
 
 Browsers only allow microphone access on
@@ -443,5 +471,6 @@ Send the text `reset` between songs. Set `CHORDSTREAM_ONLY_CHANGES=1` to receive
 ## Tests
 
 `uv run pytest`: chord parsing (Harte, free text, extended), UG extraction, CQT pitch alignment,
-streaming/offline CQT parity, CNN/Transformer causality, KV-cache step ≡ full forward (also for the
+streaming/offline CQT parity, CNN/Transformer causality, KV-cache step (newest-frame CNN cone only) ≡ full forward (also for the
 optional sheet head), label-delay targets and realignment, HMM anti-flicker, key-aware spelling.
+Browser engine vs Python engine: `cd tests/web; npm ci; npm run parity` (see the browser-only section).

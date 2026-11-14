@@ -1,0 +1,48 @@
+# Browser-only site on GitHub Pages: the page, the in-browser engine (WebGPU, WebAssembly fallback),
+# onnxruntime-web and the web model bundle from the model's GitHub release
+# (chordstream-vNN-web.zip, made with `chordstream export-web`). To ship a new model, upload its web
+# zip to the release and change WEB_MODEL.
+name: Deploy site
+on:
+  push:
+    branches: [main]
+    paths: ["src/chordstream/web/**", "scripts/build_site.py", "tests/web/package*.json", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+env:
+  WEB_MODEL: v12
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+        working-directory: tests/web
+      - name: Download the web model bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "model-$WEB_MODEL" -p "chordstream-$WEB_MODEL-web.zip" -D dl
+          unzip -q "dl/chordstream-$WEB_MODEL-web.zip" -d webmodel
+      - run: python3 scripts/build_site.py --model webmodel --ort tests/web/node_modules/onnxruntime-web/dist --out _site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

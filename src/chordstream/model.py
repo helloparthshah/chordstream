@@ -42,6 +42,13 @@ class CausalConvBlock(nn.Module):
         h = self.bn2(self.conv2(F.pad(h, (0, 0, *self.pads))))
         return self.pool(F.gelu(h + self.skip(x)))
 
+    def forward_valid(self, x: torch.Tensor) -> torch.Tensor:
+        """Unpadded in time: T frames in, T - 2 * t_pad out. These are exactly forward(x)'s last
+        T - 2 * t_pad frames, because the left padding never reaches them (causal model only)."""
+        h = F.gelu(self.bn1(self.conv1(x)))
+        h = self.bn2(self.conv2(h))
+        return self.pool(F.gelu(h + self.skip(x)[:, :, 2 * self.t_pad:]))
+
 
 def receptive_field_cnn(cfg: ModelConfig) -> int:
     return 1 + 2 * 2 * len(cfg.cnn_channels)  # two time-kernel-3 convs per block
@@ -184,8 +191,19 @@ class StreamingStep(nn.Module):
         dist = torch.arange(W - 1, -1, -1).float()  # cache slot j is W-1-j frames old
         self.register_buffer("bias", (-net.slopes[:, None] * dist)[None, :, None, :], persistent=False)
 
+    def embed_last(self, frames):
+        """Embedding of the newest frame only: each conv computes just the frames the last output
+        depends on (13 -> 9 -> 5 -> 1 across the blocks) instead of all 13. Same result as
+        net.embed(frames)[:, -1:], about 3.5x less CNN work per step (matters in the browser)."""
+        net, nb = self.net, self.net.cfg.n_bins
+        h = frames[:, None, :, :nb]
+        for blk in net.cnn:
+            h = blk.forward_valid(h)
+        B, C, T, Fq = h.shape
+        return net.proj(h.permute(0, 2, 1, 3).reshape(B, T, C * Fq))
+
     def forward(self, frames, k_cache, v_cache):
-        h = self.net.embed(frames)[:, -1:]
+        h = self.embed_last(frames) if not self.net.cfg.bidirectional and not self.net.cfg.key_input             else self.net.embed(frames)[:, -1:]
         ks, vs = [], []
         for i, blk in enumerate(self.net.blocks):
             h, k, v = blk.step(h, k_cache[i], v_cache[i], self.bias)

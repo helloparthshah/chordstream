@@ -19,6 +19,7 @@ copyrighted; keep it local and do not redistribute.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 import subprocess
@@ -180,6 +181,26 @@ def offset_curve(chroma: np.ndarray, tpl: np.ndarray, max_shift: int) -> np.ndar
     return np.array([score_at(chroma, tpl, s) for s in range(-max_shift, max_shift + 1)])
 
 
+TUNINGS = (0.0, -50.0, -25.0, 25.0)  # cents: CQT reference shifts tried by align_tuned
+
+
+def align_tuned(audio: np.ndarray, segs, cfg: FrontendConfig, tunings=TUNINGS, max_shift_s: float = 10.0) -> dict:
+    """align() at several CQT tunings; keeps the one with the clearest key margin.
+
+    The verification chroma pools the 2 bins of each semitone (on the note and 50 cents above), so a
+    recording 15-45 cents flat of A440 smears into its lower neighbour and fails the key-margin test
+    although labels and audio match. Before this, those songs were rejected, which left the training
+    data short of flat recordings (the F11 tuning cliff). Labels are never shifted; "tuning" is logged.
+    """
+    best = None
+    for c in tunings:
+        a = align(audio, segs, dataclasses.replace(cfg, fmin=cfg.fmin * 2 ** (c / 1200)), max_shift_s)
+        a["tuning"] = c
+        if best is None or a["key_margin"] > best["key_margin"]:
+            best = a
+    return best
+
+
 def align(audio: np.ndarray, segs, cfg: FrontendConfig, max_shift_s: float = 10.0) -> dict:
     feats = offline_cqt(audio, cfg, device="cpu")  # keep the GPU free
     chroma = chroma_from_cqt(feats, cfg.bins_per_semitone)
@@ -218,6 +239,16 @@ def fetch_billboard(
     min_score: float = 0.2, min_margin: float = 0.08, max_drift: float = 0.3, sleep: float = 2.0,
     cookies_from_browser: str | None = None, max_bot_errors: int = 3,
 ) -> None:
+    fetch_catalog(load_catalog(raw), out, limit, tolerance, min_score, min_margin, max_drift, sleep,
+                  cookies_from_browser, max_bot_errors)
+
+
+def fetch_catalog(
+    entries: list[Entry], out: str | Path, limit: int | None = None, tolerance: float = 4.0,
+    min_score: float = 0.2, min_margin: float = 0.08, max_drift: float = 0.3, sleep: float = 2.0,
+    cookies_from_browser: str | None = None, max_bot_errors: int = 3,
+) -> None:
+    """Search, download, align and verify every entry (any dataset with artist, title, duration, .lab)."""
     if cookies_from_browser:
         YDL_EXTRA["cookiesfrombrowser"] = (cookies_from_browser,)
     out = Path(out)
@@ -229,7 +260,7 @@ def fetch_billboard(
     if manifest.exists():
         done = {json.loads(l)["id"] for l in manifest.read_text(encoding="utf-8").splitlines() if l.strip()}
     cfg = FrontendConfig()
-    catalog = [e for e in load_catalog(raw) if e.id not in done]
+    catalog = [e for e in entries if e.id not in done]
     if limit:
         catalog = catalog[:limit]
     print(f"{len(catalog)} songs to fetch ({len(done)} already in manifest)")
@@ -248,7 +279,7 @@ def fetch_billboard(
                 wav = out / f"{e.id}.flac"
                 download_audio(cand["id"], wav, out / "_tmp", cfg.sample_rate)
                 segs = read_lab(e.lab)
-                a = align(load_audio(wav, cfg.sample_rate), segs, cfg)
+                a = align_tuned(load_audio(wav, cfg.sample_rate), segs, cfg)
                 rec.update(a)
                 if accept(a, min_score, min_margin, max_drift):
                     write_lab([(s + a["offset"], t + a["offset"], c) for s, t, c in segs], out / f"{e.id}.lab")
@@ -303,4 +334,32 @@ def rescore(raw: str | Path, out: str | Path, min_score: float = 0.2, min_margin
     stats: dict = {}
     for r in rows:
         stats[r["status"]] = stats.get(r["status"], 0) + 1
+    return stats
+
+
+def realign_rejected(entries: list[Entry], out: str | Path, dst: str | Path | None = None, min_score: float = 0.2,
+                     min_margin: float = 0.08, max_drift: float = 0.3) -> dict:
+    """Re-check rejected downloads with align_tuned (no network). Recovered songs are written to dst
+    (audio + offset-corrected .lab; default: back into out) and marked "recovered" in the manifest."""
+    out = Path(out); dst = Path(dst) if dst else out; dst.mkdir(parents=True, exist_ok=True)
+    cfg, labs = FrontendConfig(), {e.id: e.lab for e in entries}
+    manifest = out / "manifest.jsonl"
+    rows = [json.loads(l) for l in manifest.read_text(encoding="utf-8").splitlines() if l.strip()]
+    stats = {"recovered": 0, "still_rejected": 0}
+    for r in rows:
+        src = out / "_rejected" / f"{r['id']}.flac"
+        if r["status"] != "rejected" or "tuning" in r or not src.exists() or r["id"] not in labs:
+            continue
+        segs = read_lab(labs[r["id"]])
+        a = align_tuned(load_audio(src, cfg.sample_rate), segs, cfg)
+        r.update(a)
+        if accept(a, min_score, min_margin, max_drift):
+            src.replace(dst / src.name)
+            write_lab([(s + a["offset"], t + a["offset"], c) for s, t, c in segs], dst / f"{r['id']}.lab")
+            r["status"] = "recovered"; stats["recovered"] += 1
+        else:
+            stats["still_rejected"] += 1
+        print(f"{r['status']:10s} {r['artist']} - {r['title']}  tuning {a['tuning']:+.0f} score {a['score']:.2f} "
+              f"margin {a['key_margin']:.2f} drift {a['drift']:.2f}", flush=True)
+        manifest.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in rows), encoding="utf-8")
     return stats

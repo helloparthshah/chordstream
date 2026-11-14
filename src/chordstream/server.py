@@ -85,7 +85,7 @@ def index():
     # copy (seen on phones) can never pair a new page with an old script.
     html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
     for asset in sorted(WEB_DIR.glob("*.js")):
-        html = html.replace(f"/static/{asset.name}\"", f"/static/{asset.name}?v={int(asset.stat().st_mtime)}\"")
+        html = html.replace(f"static/{asset.name}\"", f"static/{asset.name}?v={int(asset.stat().st_mtime)}\"")
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 

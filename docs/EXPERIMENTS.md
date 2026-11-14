@@ -940,6 +940,68 @@ Dates are the day the experiment ran.
   (v11 68.0%). CPU 3.6 ms/frame vs 2.7 ms for v11 in the same run (p99 5.0 ms, budget 40 ms).
 - **Decision:** deployed **E38 as v12** (ONNX parity 3.10e-06).
 
+### F12 · Where does longer context help? · 2026-11-13
+- **Script:** [`analysis_context_position.py`](../experiments/analysis_context_position.py). Accuracy by time
+  into the song, and (after 32 s, where every model has a full window) on passages whose 4-chord
+  progression already occurred earlier ("repeated") vs not ("first").
+
+  | v12 − v10 (pt) | 0–5 s | 5–16 s | 16–32 s | 32–64 s | > 64 s | first / repeated (after 32 s) |
+  |---|---|---|---|---|---|---|
+  | Billboard | +1.2 | +1.4 | +0.1 | +2.7 | +3.5 | +3.0 / +3.5 |
+  | Bollywood | +0.6 | +2.4 | +1.6 | +1.9 | +3.8 | +3.5 / +3.5 |
+
+- **Findings:** the gain grows with time into the song and is the same on first and repeated
+  passages. The long window supplies song-wide context (key, timbre, harmonic vocabulary), not
+  recall of repeats, which a compact running summary could carry at constant cost (planned E41).
+
+### E39 · 64 s attention context · 2026-11-13 — `models/e39_ctx1600`
+- **Script:** [`2026-11-13_context1600.ps1`](../experiments/2026-11-13_context1600.ps1). v12's recipe with
+  `--context 1600`, batch 4, ~10 min/epoch (vs 73 s for E38; RAM-bound on this machine).
+
+  | majmin | BB clean / full | BB no bass < 150 / < 300 | inverted | Bolly clean / full | Bolly no bass < 150 / < 300 | **overall** | Steady changes/min (BB / Bolly) | Steady blips/min |
+  |---|---|---|---|---|---|---|---|---|
+  | v12 | 82.5 / 72.8% | 80.8 / 73.8% | 52.8% | 82.4 / 79.8% | 71.6 / 56.5% | 82.5% | 32.9 / 46.6 | 1.0 / 4.2 |
+  | E39 | **83.0 / 73.7%** | **81.0** / 74.7% | **55.3%** | **83.0 / 80.7%** | **72.4 / 58.6%** | **83.0%** | 31.7 / 49.1 | 1.0 / 4.8 |
+
+- **Findings:** still improving but with diminishing returns: 5 → 16 s +2.0 pt overall, 16 → 32 s
+  +1.2, 32 → 64 s +0.5. The tuning cliff is unchanged (Billboard −30 cents 36.1%). Per-step attention
+  work and KV cache double again.
+- **Decision:** not deployed for now: +0.5 pt does not justify doubling per-step cost, mainly in the
+  browser (W01). The context direction continues as E41 (short window + running summaries).
+
+### D02 · Tuning-blind alignment check, and ChoCo songs · 2026-11-13
+- **Bug:** `youtube.align` verifies a download with a chroma key-margin test, pooling CQT bins
+  (2k, 2k+1) per pitch class. For a recording about 50 cents flat the energy straddles pitch classes
+  and the margin collapses, so flat recordings were rejected from all training data. **Fix:**
+  `align_tuned` tries tunings 0, −50, −25, +25 cents and keeps the best margin; the other checks
+  (score, drift) are unchanged. `realign_rejected` re-checks earlier rejects.
+- **Billboard:** 83 of 272 rejected songs recovered (tunings −50: 69, −25: 11, +25: 3) into
+  `data/billboard_rec` (train-only prefix `bbrec`). Measured tuning of 21 of them: mean −11.9 cents
+  (12 below −10), vs +3 for songs that passed before.
+- **ChoCo** ([`data/choco.py`](../src/chordstream/data/choco.py), `chordstream fetch-choco`): the
+  audio-aligned human annotations of Isophonics, USPop2002, Robbie Williams and JAAH (547 songs after
+  removing Billboard test duplicates and the Bohemian Rhapsody test song). Recordings found and
+  verified on YouTube: 311 accepted, +50 recovered by the tuning-aware re-check = **361 songs
+  (~22 h)**, train-only prefix `choco`. Most remaining rejects fail the drift check (JAAH jazz takes).
+- **Next:** E40 = v12's recipe + these 444 songs ([`2026-11-13_choco.ps1`](../experiments/2026-11-13_choco.ps1)).
+
+### W01 · Browser-only version (GitHub Pages) · 2026-11-13
+- **What:** the live engine ported to JavaScript ([`web/engine.js`](../src/chordstream/web/engine.js)):
+  causal CQT, ONNX step model through onnxruntime-web (WebGPU, WebAssembly fallback) in a Web Worker,
+  causal HMM, beat tracker, key spelling, chord-sheet commit and Steady display. The page is the same
+  `index.html`; in browser-only mode a `LocalSocket` replaces the server WebSocket and `api-local.js`
+  answers lyrics from LRCLIB directly. `chordstream export-web` writes the bundle;
+  `scripts/build_site.py` + `.github/workflows/pages.yml` deploy it.
+- **Parity** ([`tests/web/parity.mjs`](../tests/web/parity.mjs), 90 s of a Billboard song, 2250 frames, WebAssembly):
+  every chord, raw argmax, Steady display, sheet commit, beat, BPM and key **identical** to the
+  Python engine; max abs error CQT 2.4e-6, probabilities 1.0e-6.
+- **Speed:** the step model first took 52.6 ms per frame in WebAssembly (Node, 1 thread) vs 3.6 ms
+  natively. The streaming step ran the CNN over all 13 input frames although only the newest
+  output is used; `StreamingStep.embed_last` now computes just that frame's cone (13 → 9 → 5 → 1
+  frames per block; identical output, about 3.5x less CNN work). WebAssembly then: 33 ms per frame in
+  Node, **21 ms in Chromium**, inside the 40 ms budget. WebGPU: GPU kernel time ~2 ms per step,
+  KV caches kept on the GPU between steps.
+
 ### D01 · Key-aware chord spelling (display) · 2026-11-12
 - Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`
   keeps a ~30 s decaying histogram of the chords' notes, picks the best-fitting major-scale key
@@ -978,6 +1040,7 @@ Dates are the day the experiment ran.
 | `v12` | E38 | **live**, release `model-v12` (= `e38_ctx800` + HMM 5 s / power 2) |
 | `v11` | E34b | previous live model, release `model-v11` (= `e34b_ctx400_eq` + HMM 5 s / power 2) |
 | `e38_ctx800` (+ `_h5p2`) | E38 | 32 s context; = v12 |
+| `e39_ctx1600` (+ `_h5p2`) | E39 | 64 s context; +0.5 pt, not deployed (cost) |
 | `e35_tune`, `e35b_tune25` (+ `_h5p2`) | E35 | detuned training copies; not deployed |
 | `e36a_early1`, `e36b_early3` (+ `_h5p2`) | E36 | early-switch penalty; not deployed |
 | `e37a_bins24`, `e37b_bins36`, `e37c_bins36_micro` (+ `_h5p2`) | E37 | small 36-bin pilot; safe to delete |
