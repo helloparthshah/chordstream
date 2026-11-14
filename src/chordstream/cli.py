@@ -207,16 +207,9 @@ def cmd_pseudo_label(a):
 
 
 def cmd_serve(a):
-    import os
-
     import uvicorn
 
-    os.environ["CHORDSTREAM_BUNDLE"] = a.bundle
-    os.environ["CHORDSTREAM_ASR"] = a.asr
-    # HTTPS lets other devices on the LAN use their microphone (browsers only allow
-    # getUserMedia on secure origins or localhost).
-    uvicorn.run("chordstream.server:app", host=a.host, port=a.port, log_level="info",
-                ssl_certfile=a.ssl_certfile, ssl_keyfile=a.ssl_keyfile)
+    uvicorn.run("chordstream.server:app", host=a.host, port=a.port, log_level="info")
 
 
 def cmd_mic(a):
@@ -454,13 +447,9 @@ def main(argv=None):
     s.add_argument("--print", action="store_true", help="print chord changes as they happen")
     s.set_defaults(fn=cmd_transcribe)
 
-    s = sp.add_parser("serve", help="FastAPI WebSocket server + browser mic demo")
-    s.add_argument("--bundle", default="models/v12")
-    s.add_argument("--host", default="0.0.0.0")
+    s = sp.add_parser("serve", help="local gold-label annotation app (http://127.0.0.1:8000/annotate)")
+    s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8000)
-    s.add_argument("--ssl-certfile", help="serve HTTPS (needed for mic access from other devices)")
-    s.add_argument("--ssl-keyfile")
-    s.add_argument("--asr", default="off", help="Whisper size for lyric word alignment, e.g. small (needs the asr extra)")
     s.set_defaults(fn=cmd_serve)
 
     s = sp.add_parser("mic", help="live recognition from a local input device")

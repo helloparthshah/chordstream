@@ -27,7 +27,7 @@ jobs:
           node-version: 22
       - run: npm ci --no-audit --no-fund
         working-directory: tests/web
-      - run: node tests/web/syntax.mjs
+      - run: node tests/web/syntax.mjs && node tests/web/lyrics.mjs
       - name: Download the web model bundle
         env:
           GH_TOKEN: ${{ github.token }}

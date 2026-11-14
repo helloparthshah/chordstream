@@ -1,7 +1,7 @@
 [project]
 name = "chordstream"
 version = "0.1.0"
-description = "Real-time, zero-lookahead live audio to chord progression recognition"
+description = "Real-time, zero-lookahead live audio to chord progression recognition (training, evaluation, export)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -23,15 +23,6 @@ train = [
 ]
 # Local microphone / audio-interface client.
 mic = ["sounddevice>=0.4", "soundcard>=0.4.3"]
-# Sung-word timestamps for lyric alignment (serve --asr small).
-asr = ["faster-whisper>=1.1", "indic-transliteration>=2.3", "unidecode>=1.3"]
-# "Now playing" detection for the synced chord sheet (Windows media session).
-desktop = [
-    "winrt-runtime>=2.3; sys_platform == 'win32'",
-    "winrt-Windows.Media.Control>=2.3; sys_platform == 'win32'",
-    "winrt-Windows.Foundation>=2.3; sys_platform == 'win32'",
-    "winrt-Windows.Foundation.Collections>=2.3; sys_platform == 'win32'",
-]
 fetch = [
     "imageio-ffmpeg>=0.8.1",
     "yt-dlp[default]>=2026.10.26",

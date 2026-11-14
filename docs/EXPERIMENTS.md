@@ -989,8 +989,8 @@ Dates are the day the experiment ran.
 - **What:** the live engine ported to JavaScript ([`web/engine.js`](../src/chordstream/web/engine.js)):
   causal CQT, ONNX step model through onnxruntime-web (WebGPU, WebAssembly fallback) in a Web Worker,
   causal HMM, beat tracker, key spelling, chord-sheet commit and Steady display. The page is the same
-  `index.html`; in browser-only mode a `LocalSocket` replaces the server WebSocket and `api-local.js`
-  answers lyrics from LRCLIB directly. `chordstream export-web` writes the bundle;
+  `index.html`, talking to the worker through a small socket-like wrapper; lyrics come from LRCLIB
+  directly (`lyrics.js`). `chordstream export-web` writes the bundle;
   `scripts/build_site.py` + `.github/workflows/pages.yml` deploy it.
 - **Parity** ([`tests/web/parity.mjs`](../tests/web/parity.mjs), 90 s of a Billboard song, 2250 frames, WebAssembly):
   every chord, raw argmax, Steady display, sheet commit, beat, BPM and key **identical** to the
@@ -1018,6 +1018,16 @@ Dates are the day the experiment ran.
   apps there. The button now says so (it used to fail with "Cancelled (TypeError)") and points to
   Mic or Play file.
 - CI runs `tests/web/syntax.mjs` (every inline page script parses) before deploying.
+
+### W02 · Live server retired · 2026-11-14
+- With the browser version live, the Python live server was removed at the user's request: the
+  WebSocket engine endpoint, Whisper word alignment (`asr.py`, `serve --asr`), Windows "now playing"
+  (`nowplaying.py`), the server-side LRCLIB proxy (`lyrics.py`), the Docker image and the LAN tools
+  (`tools/`). The page is browser-only; the sheet times words by character position and looks lyrics
+  up from a played file's name or the search box. Browser Whisper (transformers.js, tiny/base) and
+  mic song recognition (AudD/ACRCloud, paid key + proxy) were considered and deferred.
+- `chordstream serve` remains only for the `/annotate` gold-label tool. The Python engine
+  (`stream.py`) remains for `transcribe`, `mic` and the browser parity reference.
 
 ### D01 · Key-aware chord spelling (display) · 2026-11-12
 - Chord classes had one fixed spelling (A♭m in E major, C♯ in A♭ major). `spelling.KeySpeller`

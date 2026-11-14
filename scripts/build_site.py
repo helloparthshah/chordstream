@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 
 WEB = Path(__file__).resolve().parents[1] / "src" / "chordstream" / "web"
-STATIC = ["sheet.js", "engine.js", "engine-worker.js", "api-local.js"]
+STATIC = ["sheet.js", "lyrics.js", "engine.js", "engine-worker.js"]
 ORT = ["ort.webgpu.min.mjs", "ort-wasm-simd-threaded.jsep.mjs", "ort-wasm-simd-threaded.jsep.wasm"]
 MODEL = ["meta.json", "model.onnx", "state.bin", "hmm.bin"]
 
@@ -23,7 +23,6 @@ out = Path(a.out)
 for sub in ("static", "ort", "model"):
     (out / sub).mkdir(parents=True, exist_ok=True)
 html = (WEB / "index.html").read_text(encoding="utf-8")
-html = html.replace("<head>", "<head>\n<script>window.CHORDSTREAM_LOCAL = true;</script>", 1)
 (out / "index.html").write_text(html, encoding="utf-8")
 (out / "bench.html").write_text((WEB / "bench.html").read_text(encoding="utf-8"), encoding="utf-8")
 # Cache-busting: browsers (and Pages' 10-minute cache) must never pair a new page with an old engine.

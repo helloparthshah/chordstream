@@ -1,31 +1,20 @@
-// Synced chord sheet: lyrics from LRCLIB, song + position from the OS media session,
-// chords placed above the word being sung when they were detected.
-//
-// Word timing: when the server runs Whisper (serve --asr), recognised sung words are aligned
-// to the lyric words (fuzzy, time-constrained DP). Aligned words become anchors; the other
-// words are interpolated between anchors. Line-initial anchors also auto-correct the lyrics
-// offset. Without ASR, words are timed by character position within the line.
+// Synced chord sheet: time-synced lyrics from LRCLIB (lyrics.js), chords placed above the word being
+// sung when they were detected. Song + clock: a file played in the page ("Artist - Title.mp3"), or
+// a lyrics search plus a click on the line being sung (manual sync). Words are timed by character
+// position within the line.
 (() => {
   const $ = (id) => document.getElementById(id);
-  const LAG = 0.12;          // capture + transport + model emission delay (s)
-  const POLL_MS = 1500;
+  const LAG = 0.12;          // capture + model emission delay (s)
 
   const st = {
-    np: null, npAt: 0,       // last /api/nowplaying response and when it arrived (performance.now)
     key: null, meta: null,   // current song identity
     lines: [],               // [{t, text}]
     chords: [],              // [{t (playback seconds), name, label}]
     offset: 0,               // lyrics time = playback time + offset
-    anchor: null,            // manual clock {pos, perf} when the player exposes no position
+    anchor: null,            // manual clock {pos, perf}: set by clicking the line being sung
     followUntil: 0,          // pause auto-scroll after the user scrolls
     lastNow: -1,
-    clock: null,             // {streamT, perf}: maps server stream time to performance.now()
-    ws: null, lastPrompt: null,
     tokens: [],              // per line: [{text, norm, c0, c1}] (c0/c1 = glyph offsets)
-    heard: [],               // recognised words [{t (playback s), norm, w, p}]
-    anchors: new Map(),      // lineIdx -> Map(wordIdx -> playback time)
-    res: [],                 // recent line-start residuals for auto offset
-    auto: true, asr: null,
     local: null,             // playing a local file: {name, time(), playing(), duration()}
   };
   const RATE = 0.085;        // fallback singing speed, seconds per character
@@ -36,49 +25,25 @@
       const t = st.local.time();
       return st.local.playing() ? t + (at - performance.now()) / 1000 : t;
     }
-    const np = st.np;
-    if (np && np.has_timeline && np.position != null) return np.position + (np.playing ? (at - st.npAt) / 1000 : 0);
     if (st.anchor) return st.anchor.pos + (at - st.anchor.perf) / 1000;
     return null;
   }
   const lyricTime = (pt) => (pt == null ? null : pt + st.offset);
-  // Server stream time (seconds of audio received) -> playback time of that audio.
-  function streamToPlayback(ts) {
-    if (!st.clock) return null;
-    const pt = playbackTime(st.clock.perf - (st.clock.streamT - ts) * 1000);
-    return pt == null ? null : pt - LAG;
-  }
 
-  // ------------------------------------------------------------ now playing + lyrics
-  async function poll() {
-    if (st.local) { renderHeader(); return; }  // a local file overrides the OS media session
-    try {
-      const np = await (await fetch('/api/nowplaying')).json();
-      st.np = np; st.npAt = performance.now();
-      if (np.available && np.title) {
-        const key = `${np.artist}|${np.title}`.toLowerCase();
-        if (key !== st.key) newSong(key, np);
-      }
-      renderHeader();
-    } catch { /* server restarting: try again next tick */ }
-  }
-
+  // ------------------------------------------------------------ lyrics
   async function newSong(key, np) {
     st.key = key; st.meta = { artist: np.artist, title: np.title };
     st.chords = []; st.lines = []; st.anchor = null; st.offset = 0;
-    st.heard = []; st.anchors = new Map(); st.res = []; st.tokens = []; st.lastPrompt = null;
+    st.tokens = [];
     setOffsetLabel();
     $('sheet').innerHTML = '<p class="sheet-empty">Looking up lyrics…</p>';
-    const q = new URLSearchParams({ artist: np.artist, title: np.title });
-    if (np.duration) q.set('duration', Math.round(np.duration));
-    try { loadLyrics(await (await fetch(`/api/lyrics?${q}`)).json()); }
+    try { loadLyrics((await window.lrclib.find(np.artist, np.title, np.duration)) || { synced: [], plain: '', missing: true }); }
     catch { $('sheet').innerHTML = '<p class="sheet-empty">Lyrics lookup failed. Search manually above.</p>'; }
   }
 
   function loadLyrics(rec) {
     st.lines = (rec.synced || []).filter((l) => l.t != null);
     st.tokens = st.lines.map((l) => tokenize(l.text));
-    st.anchors = new Map(); st.res = []; st.lastPrompt = null;
     if (rec.title) st.meta = { ...(st.meta || {}), lyricsTitle: `${rec.artist} – ${rec.title}` };
     if (!st.lines.length && rec.plain) {
       st.lines = []; st.plain = rec.plain;
@@ -104,146 +69,23 @@
   const segmenter = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
   const glyphs = (s) => (segmenter ? [...segmenter.segment(s)].length : [...s].length);
 
-  // Phonetic key: lowercase, strip Latin diacritics (ā -> a), keep letters/marks/digits, then
-  // fold common romanization variants (aa/ā, ee/ī, th/t, w/v, ai/ei, final nasal, doubled letters)
-  // so "Aahatein"/"āhaṭeṃ" and "theri"/"terī" compare equal. Non-Latin scripts keep their marks.
-  const norm = (w) => {
-    let k = w.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\p{L}\p{M}\p{N}]/gu, '');
-    if (!/^[a-z0-9]+$/.test(k)) return k;
-    k = k.replace(/ee/g, 'i').replace(/oo/g, 'u').replace(/([kgcjtdpbrs])h/g, '$1').replace(/ph/g, 'f')
-      .replace(/w/g, 'v').replace(/z/g, 'j').replace(/q/g, 'k').replace(/[ae]i/g, 'e').replace(/[ao]u/g, 'o')
-      .replace(/(.)\1+/g, '$1');
-    return k.length > 3 ? k.replace(/([aeiou])[mn]$/, '$1') : k;
-  };
   function tokenize(text) {
     let c = 0;
     return text.split(/\s+/).filter(Boolean).map((w) => {
-      const g = glyphs(w), tok = { text: w, norm: norm(w), c0: c, c1: c + g };
+      const g = glyphs(w), tok = { text: w, c0: c, c1: c + g };
       c += g + 1;
       return tok;
     });
   }
   const nextT = (i) => (i + 1 < st.lines.length ? st.lines[i + 1].t : Infinity);
 
-  // Lyric-time start of every word in line i: anchors where heard, interpolation elsewhere.
+  // Lyric-time start of every word in line i, from its character position within the line.
   function wordTimes(i) {
     const line = st.lines[i], toks = st.tokens[i] || [];
     if (!toks.length) return [];
     const n = toks[toks.length - 1].c1;
-    const anchors = st.anchors.get(i);
-    const known = anchors ? [...anchors.entries()].map(([k, pb]) => [toks[k].c0, pb + st.offset]).sort((a, b) => a[0] - b[0]) : [];
-    const limit = nextT(i);
-    let rate = Math.min(RATE, Math.max(0.03, (Math.min(limit, line.t + n * RATE + 0.4) - line.t) / Math.max(1, n)));
-    if (known.length >= 2) {  // measured singing speed for this line
-      const a = known[0], b = known[known.length - 1];
-      if (b[0] > a[0]) rate = Math.max(0.03, Math.min(0.4, (b[1] - a[1]) / (b[0] - a[0])));
-    }
-    if (!known.length) return toks.map((t) => line.t + t.c0 * rate);
-    const out = toks.map((t) => {
-      let lo = null, hi = null;
-      for (const kp of known) { if (kp[0] <= t.c0) lo = kp; if (kp[0] >= t.c0 && !hi) hi = kp; }
-      if (lo && hi && hi[0] !== lo[0]) return lo[1] + (hi[1] - lo[1]) * (t.c0 - lo[0]) / (hi[0] - lo[0]);
-      if (lo && hi) return lo[1];
-      if (lo) return lo[1] + (t.c0 - lo[0]) * rate;
-      return Math.max(line.t - 1, hi[1] - (hi[0] - t.c0) * rate);
-    });
-    for (let k = 1; k < out.length; k++) out[k] = Math.max(out[k], out[k - 1]);  // keep monotonic
-    return out;
-  }
-
-  function similarity(a, b) {
-    if (!a || !b) return 0;
-    if (a === b) return 1;
-    if (Math.abs(a.length - b.length) > Math.max(a.length, b.length) / 2) return 0;
-    const d = Array.from({ length: b.length + 1 }, (_, j) => j);
-    for (let i = 1; i <= a.length; i++) {
-      let prev = d[0]; d[0] = i;
-      for (let j = 1; j <= b.length; j++) {
-        const tmp = d[j];
-        d[j] = Math.min(d[j] + 1, d[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
-        prev = tmp;
-      }
-    }
-    const r = 1 - d[b.length] / Math.max(a.length, b.length);
-    return r >= 0.7 ? r * 0.8 : 0;
-  }
-
-  // Align recognised words to lyric words near the current position (monotonic DP).
-  function align() {
-    const lt = lyricTime(playbackTime());
-    if (lt == null || !st.lines.length) return;
-    const A = [];
-    st.lines.forEach((line, i) => {
-      if (!line.text || line.t < lt - 25 || line.t > lt + 6) return;
-      const wt = wordTimes(i);
-      st.tokens[i].forEach((tok, k) => A.push({ i, k, norm: tok.norm, est: wt[k] }));
-    });
-    if (!A.length) return;
-    const lo = A[0].est - 4, hi = A[A.length - 1].est + 4;
-    const B = st.heard.filter((h) => h.norm && h.t + st.offset >= lo && h.t + st.offset <= hi);
-    if (!B.length) return;
-    const n = A.length, m = B.length;
-    const score = (a, b) => (Math.abs(b.t + st.offset - a.est) <= 5 ? similarity(a.norm, b.norm) : 0);
-    const SC = Array.from({ length: n }, (_, x) => Float32Array.from(B, (b) => score(A[x], b)));
-    const S = Array.from({ length: n + 1 }, () => new Float32Array(m + 1));
-    for (let x = 1; x <= n; x++) for (let y = 1; y <= m; y++) {
-      const sc = SC[x - 1][y - 1];
-      S[x][y] = Math.max(S[x - 1][y], S[x][y - 1], sc > 0 ? S[x - 1][y - 1] + sc : -1);
-    }
-    const matches = [];
-    for (let x = n, y = m; x > 0 && y > 0;) {
-      const sc = SC[x - 1][y - 1];
-      if (sc > 0 && S[x][y] === S[x - 1][y - 1] + sc) { matches.push([A[x - 1], B[y - 1]]); x--; y--; }
-      else if (S[x][y] === S[x - 1][y]) x--;
-      else y--;
-    }
-    for (const [a, b] of matches) {
-      if (!st.anchors.has(a.i)) st.anchors.set(a.i, new Map());
-      st.anchors.get(a.i).set(a.k, b.t);
-      if (a.k === 0 && b.p >= 0.5) st.res.push(b.t + st.offset - st.lines[a.i].t);
-    }
-    st.res = st.res.slice(-9);
-    // Auto offset: a line should start when its first word is actually sung.
-    if (st.auto && st.res.length >= 3) {
-      const med = [...st.res].sort((p, q) => p - q)[st.res.length >> 1];
-      if (Math.abs(med) > 0.15) {
-        const shift = -med * 0.6;
-        st.offset += shift;
-        st.res = st.res.map((r) => r + shift);
-        setOffsetLabel();
-      }
-    }
-  }
-
-  function onWords(msg) {
-    if (!msg.words) return;
-    const lo = streamToPlayback(msg.t0 + 0.3), hi = streamToPlayback(msg.t1 - 0.6);
-    if (lo == null || hi == null) return;
-    const fresh = msg.words
-      .map((w) => ({ t: streamToPlayback(w.start), w: w.w, norm: norm(w.rom || w.w), p: w.p }))
-      .filter((w) => w.t != null && w.t >= lo && w.t <= hi);
-    st.heard = st.heard.filter((h) => h.t < lo || h.t > hi).concat(fresh).sort((a, b) => a.t - b.t).slice(-500);
-    align();
-    render();
-    renderHeader();
-  }
-  function onEvent(e) { st.clock = { streamT: e.time, perf: performance.now() }; }
-  function attachSocket(ws) { st.ws = ws; st.lastPrompt = null; }
-
-  // Tell the server which lines come next: Whisper uses them as its prompt.
-  function sendContext() {
-    if (!st.ws || st.ws.readyState !== 1 || !st.lines.length) return;
-    const lt = lyricTime(playbackTime());
-    if (lt == null) return;
-    let cur = 0;
-    st.lines.forEach((l, i) => { if (l.t <= lt) cur = i; });
-    const prompt = st.lines.slice(Math.max(0, cur - 1), cur + 4).map((l) => l.text).filter(Boolean).join(' ');
-    if (prompt && prompt !== st.lastPrompt) {
-      // Latin-script lyrics: ask the server to romanize what it hears (e.g. Devanagari -> Latin).
-      const latin = (prompt.match(/[a-z]/gi) || []).length > prompt.replace(/\s/g, '').length * 0.6;
-      st.ws.send(JSON.stringify({ type: 'context', prompt, latin, song: st.key }));
-      st.lastPrompt = prompt;
-    }
+    const rate = Math.min(RATE, Math.max(0.03, (Math.min(nextT(i), line.t + n * RATE + 0.4) - line.t) / Math.max(1, n)));
+    return toks.map((t) => line.t + t.c0 * rate);
   }
 
   // Turn lines + chords into blocks: {kind: 'line'|'inst', t, end, words:[{text, chords:[]}], chords:[]}
@@ -269,8 +111,7 @@
         return;
       }
       const toks = st.tokens[i] || [];
-      const anchors = st.anchors.get(i);
-      const words = toks.map((t, k) => ({ text: t.text, chords: [], heard: !!(anchors && anchors.has(k)) }));
+      const words = toks.map((t) => ({ text: t.text, chords: [] }));
       const wt = wordTimes(i);
       const lastTok = toks[toks.length - 1];
       const sungEnd = Math.min(next, wt[wt.length - 1] + Math.max(0.4, (lastTok.c1 - lastTok.c0) * RATE));
@@ -300,7 +141,7 @@
       return;
     }
     if (!st.lines.length && !st.chords.length) {
-      sheet.innerHTML = `<p class="sheet-empty">${st.key ? 'No synced lyrics found for this song. Try the search box.' : 'Play a song in any app. It will show up here.'}</p>`;
+      sheet.innerHTML = `<p class="sheet-empty">${st.key ? 'No synced lyrics found for this song. Try the search box.' : 'Search for the lyrics above, or play a file named "Artist - Title". Chords appear over the words as they are sung.'}</p>`;
       return;
     }
     sheet.innerHTML = layout().map((b, i) => {
@@ -309,7 +150,7 @@
         if (!b.chords.length && !b.label) return '';
         return `<div class="block inst" ${attrs}>${b.label ? `<span class="tag">${b.label}</span>` : ''}<div class="chordrow">${chordHtml(b.chords) || '<i>…</i>'}</div></div>`;
       }
-      const words = b.words.map((w) => `<span class="w${w.heard ? ' heard' : ''}"><span class="c">${chordHtml(w.chords) || '&nbsp;'}</span>${esc(w.text)}</span>`).join(' ');
+      const words = b.words.map((w) => `<span class="w"><span class="c">${chordHtml(w.chords) || '&nbsp;'}</span>${esc(w.text)}</span>`).join(' ');
       return `<div class="block line" ${attrs}>${words}</div>`;
     }).join('');
     st.lastNow = -1;
@@ -348,44 +189,21 @@
       renderSource();
       return;
     }
-    const np = st.np;
-    const title = st.meta ? st.meta.title : (np && np.reason) || 'Nothing playing';
-    $('songtitle').textContent = title || 'Nothing playing';
+    $('songtitle').textContent = st.meta ? st.meta.title : 'No song';
     $('songartist').textContent = st.meta ? st.meta.artist : '';
     const pt = playbackTime();
-    let sync;
-    if (np && np.has_timeline) sync = `${np.playing ? 'Playing' : 'Paused'} · ${fmt(pt)} / ${fmt(np.duration)} · synced to ${appName(np.app)}`;
-    else if (st.anchor) sync = `Manual sync · ${fmt(pt)}`;
-    else if (np && np.available) sync = `${appName(np.app)} doesn't report position. Click the line being sung to sync`;
-    else sync = np && np.reason ? np.reason : '';
-    $('songsync').textContent = sync;
+    $('songsync').textContent = st.anchor ? `Manual sync · ${fmt(pt)}`
+      : st.lines.length ? 'Click the line being sung to sync the lyrics' : 'Play a file here, or search for the lyrics';
     renderSource();
   }
   function renderSource() {
-    const src = st.meta && st.meta.lyricsTitle ? `Lyrics: LRCLIB (${st.meta.lyricsTitle})` : '';
-    let vs = '';
-    if (st.asr && st.asr.enabled) {
-      const n = [...st.anchors.values()].reduce((a, m) => a + m.size, 0);
-      vs = st.asr.ready ? `Vocal sync (Whisper ${st.asr.model} on ${st.asr.device}): ${n} words matched`
-        : st.asr.error ? `Vocal sync unavailable: ${st.asr.error}` : 'Vocal sync: loading model…';
-    } else if (st.asr) vs = 'Vocal sync off (start the server with --asr small)';
-    $('songsrc').textContent = [src, vs].filter(Boolean).join(' · ');
-  }
-  function appName(id = '') {
-    const low = id.toLowerCase();
-    if (low.includes('spotify')) return 'Spotify';
-    if (low.includes('youtube-music')) return 'YouTube Music';
-    if (low.includes('chrome')) return 'Chrome';
-    if (low.includes('edge')) return 'Edge';
-    if (low.includes('firefox') || /^[0-9A-F]{16}$/.test(id)) return 'Firefox';
-    return id.split(/[\\!.]/).filter(Boolean).pop() || 'player';
+    $('songsrc').textContent = st.meta && st.meta.lyricsTitle ? `Lyrics: LRCLIB (${st.meta.lyricsTitle})` : '';
   }
   function setOffsetLabel() { $('offset').textContent = `${st.offset >= 0 ? '+' : ''}${st.offset.toFixed(1)} s`; }
 
   function bindControls() {
-    $('offminus').onclick = () => { st.offset -= 0.1; st.res = []; setOffsetLabel(); render(); };
-    $('offplus').onclick = () => { st.offset += 0.1; st.res = []; setOffsetLabel(); render(); };
-    $('autosync').onchange = (ev) => { st.auto = ev.target.checked; st.res = []; };
+    $('offminus').onclick = () => { st.offset -= 0.1; setOffsetLabel(); render(); };
+    $('offplus').onclick = () => { st.offset += 0.1; setOffsetLabel(); render(); };
     // Only real user input pauses auto-follow (programmatic smooth scrolling also fires 'scroll').
     const hold = () => { st.followUntil = performance.now() + 4000; };
     for (const ev of ['wheel', 'touchmove', 'keydown', 'pointerdown']) $('sheet').addEventListener(ev, hold, { passive: true });
@@ -397,10 +215,9 @@
       const pt = playbackTime();
       if (pt == null) { st.anchor = { pos: t, perf: performance.now() }; st.offset = 0; }
       else st.offset = t - pt;
-      st.res = [];
       setOffsetLabel(); render(); renderHeader();
     });
-    $('clearsheet').onclick = () => { st.chords = []; st.heard = []; st.anchors = new Map(); st.res = []; render(); };
+    $('clearsheet').onclick = () => { st.chords = []; render(); };
     $('copysheet').onclick = async () => {
       try { await navigator.clipboard.writeText(toText()); flash($('copysheet'), 'Copied'); } catch { flash($('copysheet'), 'Blocked'); }
     };
@@ -418,7 +235,7 @@
       const box = $('results');
       box.innerHTML = '<span class="muted">Searching…</span>';
       try {
-        const res = await (await fetch(`/api/lyrics/search?q=${encodeURIComponent(q)}`)).json();
+        const res = await window.lrclib.search(q);
         box.innerHTML = '';
         res.filter((r) => r.synced.length).slice(0, 6).forEach((r) => {
           const btn = document.createElement('button');
@@ -517,7 +334,6 @@
   // Local file: "Artist - Title.mp3" -> lyrics lookup; the player drives the clock.
   function setLocal(src) {
     st.local = src;
-    st.key = null;  // forget the OS song; the next poll picks it up again after the file stops
     if (!src) { renderHeader(); return; }
     const base = src.name.replace(/\.[^.]+$/, '').replace(/_+/g, ' ').replace(/^\d+[\s.-]+/, '').trim();
     const [a, ...rest] = base.split(/\s+[-–—]\s+/);
@@ -528,13 +344,8 @@
     };
     Number.isFinite(src.duration()) ? go() : setTimeout(go, 400);  // give the player a moment to read the duration
   }
-  window.sheet = { addChord, onWords, onEvent, attachSocket, setLocal, debug: () => st };
+  window.sheet = { addChord, setLocal, debug: () => st };
   bindControls();
-  poll();
-  const pollAsr = async () => { try { st.asr = await (await fetch('/api/asr')).json(); renderHeader(); } catch {} };
-  pollAsr();
-  setInterval(() => { if (!st.asr || (st.asr.enabled && !st.asr.ready && !st.asr.error)) pollAsr(); }, 3000);
-  setInterval(sendContext, 1000);
-  setInterval(() => { if (!document.hidden) poll(); }, POLL_MS);
-  setInterval(() => { highlight(); if (st.np && st.np.playing) renderHeader(); }, 250);
+  renderHeader(); render();
+  setInterval(() => { highlight(); if (st.local || st.anchor) renderHeader(); }, 250);
 })();

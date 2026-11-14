@@ -197,25 +197,6 @@ def test_aligner_recovers_known_offset_and_rejects_wrong_key():
     assert w["score"] < a["score"] - 0.1 and w["key_margin"] < 0.08
 
 
-def test_lrc_parsing_and_title_cleanup():
-    from chordstream.lyrics import clean_title, parse_lrc
-
-    lines = parse_lrc("[00:12.50] Hello there\n[01:02.00]\n[00:03.10]First\nnot a timed line")
-    assert [l["t"] for l in lines] == [3.1, 12.5, 62.0]
-    assert lines[0]["text"] == "First" and lines[2]["text"] == ""  # blank = instrumental break
-    assert clean_title("In the End (Official Audio)") == "In the End"
-    assert clean_title("Song [Lyric Video] (Remastered 2009)") == "Song"
-
-
-def test_romanize_devanagari_for_romanized_lyrics():
-    pytest.importorskip("indic_transliteration")
-    from chordstream.asr import romanize
-
-    assert romanize("दिल") == "dil"  # schwa deletion: not "dila"
-    assert romanize("तेरी") == "terī"
-    assert romanize("hello") == "hello"
-
-
 def test_transition_weights_mark_frames_after_changes():
     torch = pytest.importorskip("torch")
     from chordstream.train import transition_weights

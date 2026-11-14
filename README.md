@@ -1,6 +1,7 @@
 # chordstream
 
-Real-time chord recognition from live audio. Each 40 ms of audio produces one decision, computed
+Real-time chord recognition from live audio, running entirely in the browser:
+**https://helloparthshah.github.io/chordstream/**. Each 40 ms of audio produces one decision, computed
 only from audio already heard. The live model (v12) names the chord of the audio 120 ms ago: that
 short, trained-in delay lets each decision hear a little of what follows, which removes much of
 the flicker at chord changes. It names 108 chords (12 roots × maj, min, 7, maj7, m7, dim, aug,
@@ -16,7 +17,7 @@ under [Architecture](#architecture) show the same pipeline.
 
 ```
 mic / file / system audio
-  → 1. browser: mono, 16 kHz, 40 ms chunks ──WebSocket──► server
+  → 1. browser: mono, 16 kHz, 40 ms chunks ──► engine (Web Worker, same device)
   → 2. CQT: 144 note-pitch energies per 40 ms frame
   → 3. log compression
   → 4. neural network: probabilities for 108 chords + "no chord"
@@ -32,8 +33,8 @@ mic / file / system audio
   and would damage music.
 - **Played file:** it runs at the device's normal rate so it sounds right. A copy is low-passed at
   7 kHz and averaged down to 16 kHz mono.
-- **Sending:** an AudioWorklet gathers 640 samples (40 ms) and sends each chunk to the server over a
-  WebSocket. Every chunk becomes exactly one chord decision.
+- **Handing over:** an AudioWorklet gathers 640 samples (40 ms) and passes each chunk to the engine,
+  which runs in a Web Worker on the same device. Every chunk becomes exactly one chord decision.
 
 **2. Turning sound into pitches (constant-Q transform).** Chords are sets of notes, so the first job
 is measuring how much energy there is at each musical pitch.
@@ -44,8 +45,8 @@ is measuring how much energy there is at each musical pitch.
   - A small variable-Q offset (`gamma` = 3 Hz) shortens the lowest windows, so bass notes don't smear
     across chord changes.
 - **No look-ahead:** every window ends at the current sample.
-- **Identical features:** the live server and the training code compute the same numbers, and a test
-  checks this.
+- **Identical features:** the browser engine, the Python engine and the training code compute the
+  same numbers, and tests check this.
 
 **3. Log compression.** Each energy becomes `log(1 + 100 × energy)`, which is roughly how the ear
 works. A note twice as loud doesn't count twice as much, so quiet inner voices of a chord still
@@ -61,12 +62,13 @@ chord".
   - Each block halves the pitch resolution, from 144 bins down to 18 positions × 64 learned
     features. Each output sees 13 frames (~0.5 s).
 - **Context (a Transformer):**
-  - 4 layers; at each layer the current frame can attend to up to the previous 400 frames (~16 s, about 8 bars), and
+  - 4 layers; at each layer the current frame can attend to up to the previous 800 frames (~32 s, about 16 bars), and
     nearer frames count more.
   - This is where musical context enters. If the last few seconds were clearly A major, an ambiguous
     frame leans towards the chords that fit.
-- **Streaming:** the server keeps each layer's memory of past frames (a KV cache), so each new frame
-  costs one step, about 2.4 ms of CPU.
+- **Streaming:** the engine keeps each layer's memory of past frames (a KV cache), and the CNN computes
+  only the newest frame, so each new frame costs one step: about 15–20 ms in a phone or laptop
+  browser, 3.6 ms in native Python.
 - **The 120 ms delay (E23):** the model is trained so its output at time t names the chord at
   t − 120 ms. Each decision has therefore heard 120 ms of what comes next, which removes much of the
   flicker exactly at chord changes.
@@ -125,9 +127,10 @@ timeline. It doesn't improve chord accuracy (E05, E16), so it is display-only.
 
 ### System
 
-Audio comes from a microphone, a loopback device, a shared tab or a local file. The browser streams
-16 kHz PCM over a WebSocket, and the server answers each 40 ms frame with a chord event. The chord
-sheet combines those events with the song's timed lyrics.
+Audio comes from a microphone, a loopback device, a shared tab or a local file. Everything runs in
+the browser: an AudioWorklet hands 16 kHz audio to the engine in a Web Worker, which answers each
+40 ms frame with a chord event. The chord sheet combines those events with the song's timed lyrics
+from LRCLIB.
 
 ```mermaid
 flowchart LR
@@ -136,18 +139,13 @@ flowchart LR
         UI["Live chord + diagram<br/>visualizer, BPM, timeline"]
         SHEET["Chord sheet<br/>chords over lyrics"]
     end
-    subgraph Server["chordstream server (FastAPI)"]
-        ENG["Streaming engine<br/>(see below)"]
-        ASR["Whisper (optional)<br/>sung-word timestamps"]
-        NP["Windows media session<br/>now playing + position"]
-        LY["LRCLIB<br/>timed lyrics (cached)"]
+    subgraph Worker["Web Worker (same device)"]
+        ENG["Streaming engine<br/>(see below)<br/>CPU or GPU"]
     end
-    WL -- "WebSocket: PCM" --> ENG
-    WL -- "same audio" --> ASR
+    LY["LRCLIB<br/>timed lyrics"]
+    WL -- "PCM" --> ENG
     ENG -- "chord per frame (120 ms behind),<br/>key, BPM, beat pulse" --> UI
     ENG -- "committed chords<br/>(held ≥ 480 ms, backdated)" --> SHEET
-    ASR -- "word times" --> SHEET
-    NP --> SHEET
     LY --> SHEET
 ```
 
@@ -155,7 +153,9 @@ flowchart LR
 
 Everything is causal: each step uses only audio up to "now". The network is trained to name the
 chord of 3 frames earlier (label delay, 120 ms), so its decision for a frame has heard 120 ms past it. The network runs incrementally, with
-the CNN on its 13-frame receptive field and a per-layer KV cache, so a step costs about 2–3 ms of CPU.
+the CNN computing only the newest frame from its 13-frame receptive field and a per-layer KV cache.
+It is the same in the browser (`web/engine.js`) and in Python (`stream.py`, used by `transcribe` and
+`mic`); `tests/web/parity.mjs` checks they agree frame by frame.
 
 ```mermaid
 flowchart LR
@@ -235,7 +235,7 @@ Trained bundles are attached to GitHub Releases, so they don't bloat git history
 
 ```powershell
 gh release download model-v12 --pattern "*.zip" --dir models
-Expand-Archive models/chordstream-v12.zip models; uv run chordstream serve --bundle models/v12
+Expand-Archive models/chordstream-v12.zip models; uv run chordstream transcribe song.wav --bundle models/v12 --print
 ```
 
 They were trained on copyrighted recordings, so keep them for personal use. The browser-only site
@@ -283,10 +283,9 @@ uv run python experiments/analysis_bollywood.py --v3 models/v12_h5p2   # 61 Boll
 uv run python experiments/analysis_bass.py models/v12_h5p2            # robustness without bass
 uv run chordstream export models/v12_h5p2       # ONNX + parity check
 
-# 8. Run (default bundle: models/v12)
+# 8. Ship to the browser site (see "Browser version" below), or run the Python engine locally
 uv run chordstream transcribe song.wav --ref song.lab --print   # simulated live stream + latency stats
 uv run chordstream mic                                           # local input device
-uv run chordstream serve                                         # http://localhost:8000 browser demo, ws://…/ws
 ```
 
 **Bollywood data and rare chords** (see [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) E21, E27):
@@ -322,58 +321,30 @@ YouTube often bot-blocks anonymous downloads; `--cookies-from-browser` uses a si
 browser session. The fetcher stops after repeated bot or rate-limit errors instead of
 retrying.
 
-## Run locally or in Docker?
-
-Train natively, since the GPU is used directly. Run live inference natively too: the
-per-frame model is tiny, so CPU ONNX is as fast as a GPU would be, and a container on
-Windows cannot open the microphone. The Docker image is a slim, PyTorch-free
-deployment target for streaming over the LAN through the WebSocket API:
-
-```powershell
-docker build -t chordstream .
-docker run -p 8000:8000 chordstream
-```
-
 ## Live chord sheet
 
-`chordstream serve`, then open http://localhost:8000.
-
-- **Audio input:** use **Listen** with an input device (a mic, or a loopback bus such as a
-  Voicemeeter "Out" bus or Stereo Mix), or **System audio** in Chrome/Edge. The level
-  meter, spectrum and pitch-class bars (with the detected chord's tones lit) confirm that
-  audio is arriving.
-- **Now playing:** on Windows the server reads the OS media session (`/api/nowplaying`),
-  which gives the title, artist and playback position from Spotify, YouTube Music, browsers
-  and so on. It then fetches time-synced lyrics from [LRCLIB](https://lrclib.net)
-  (`/api/lyrics`), cached in `data/lyrics_cache/`.
+- **Audio input:** **Listen** with an input device (a mic, or a loopback bus such as a Voicemeeter
+  "Out" bus or Stereo Mix), **System audio** (Chrome/Edge on a computer: share a tab or the screen
+  with audio), or **Play file** to play a song in the page. Phone browsers can't share other apps'
+  audio, so on a phone use the mic or Play file. The level meter, spectrum and pitch-class bars (with
+  the detected chord's tones lit) confirm that audio is arriving.
+- **Lyrics:** time-synced lyrics come from [LRCLIB](https://lrclib.net), looked up from the file name
+  ("Artist - Title.mp3") when playing a file, or with the search box.
 - **Placement:** the engine commits a chord to the sheet once it has held 480 ms, backdated to
   where it began, and the page places it above the word being sung at that moment, Ultimate
-  Guitar-style. Short blips appear only in the small "hearing …" line (or the big chord in Instant mode), never on the sheet. Placement within a line is by timing, so it's
-  approximate. Chords outside lyric lines go into Intro or Instrumental rows.
-- **Sync controls:** **±** shifts the lyrics against the music, and clicking a lyric line
-  as it is sung re-syncs everything. If the player doesn't report a position, clicking a
-  line starts a manual clock.
+  Guitar-style. Short blips appear only in the small "hearing …" line (or the big chord in Instant
+  mode), never on the sheet. Words are timed by their position within the line, so placement within
+  a line is approximate. Chords outside lyric lines go into Intro or Instrumental rows.
+- **Sync controls:** a played file drives the clock. Otherwise click a lyric line as it is sung to
+  start a manual clock; **±** shifts the lyrics against the music.
 - **Export:** **Copy** or **Download** gives a plain-text chords-over-lyrics sheet.
   `/#listen` auto-starts with the remembered input.
 
-Requires `uv sync --extra desktop` (Windows media-session bindings).
-
-**Word-level sync (optional):** `chordstream serve --asr small`, with `uv sync --extra asr`
-and a GPU recommended.
-- **Transcription:** every 2 s the server runs faster-whisper over the newest 8 s of audio,
-  using the upcoming lyric lines as its prompt, and returns word timestamps (~0.5 s per
-  window on an RTX 3050).
-- **Alignment:** the page aligns those words to the lyric words with a fuzzy,
-  time-constrained DP. Matched words are underlined and become timing anchors. Chords snap
-  to the word being sung, and other words are interpolated between anchors.
-- **Auto-sync:** line-start anchors correct the lyrics offset automatically. Turn it off
-  with the **Auto-sync** toggle.
-- **Script:** this works in any script Whisper writes in. Romanized lyrics of non-English
-  songs match poorly, because Whisper writes Hindi in Devanagari.
-
 ## Gold labels for the Bollywood test songs
 
-`https://<host>:8000/annotate` opens a correction page for the 61 Bollywood test songs (E21/E28). It
+`uv run chordstream serve`, then http://127.0.0.1:8000/annotate, opens a correction page for the
+61 Bollywood test songs (E21/E28); it is the only part of chordstream that still runs as a local
+server, since it reads the songs' audio and writes labels to `data/`. It
 loads a song's audio and its sheet-aligned chords on a zoomable timeline; you play it (optionally
 slower, looping one segment), click a segment and press **1–9** for the sheet's chords (**0** =
 no chord, **X** = unsure, excluded from scoring), drag boundaries, **S**plit at the playhead or
@@ -407,7 +378,7 @@ first fine-tuned model scored 73.8% on Billboard's original 10. A step costs abo
 **[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)**, with commands and decisions. The batch scripts
 are in [`experiments/`](experiments/).
 
-## Browser-only version (GitHub Pages)
+## Browser version (GitHub Pages)
 
 **https://helloparthshah.github.io/chordstream/** runs everything in the browser: no server, and the
 audio never leaves the device. A CPU / GPU toggle in the model badge picks where the model runs:
@@ -417,9 +388,9 @@ vs GPU 40 ms per 40 ms frame; a laptop CPU about 20 ms). While listening, the ba
 compute time per step, in red above 40 ms (the engine is falling behind real time). The badge is
 separate from the audio status. `?provider=webgpu` or `?provider=wasm` overrides the toggle. Phone
 browsers can't share other apps' audio
-with a web page, so on a phone use the mic or play the song as a file in the page. Otherwise mic,
-system audio and audio files work as in the server version, and lyrics come straight from LRCLIB. Not available without the desktop server:
-"now playing" from the OS media session and vocal recognition (Whisper).
+with a web page, so on a phone use the mic or play the song as a file in the page. Lyrics come
+straight from LRCLIB. (An earlier desktop server added Windows "now playing" detection and Whisper
+word alignment; both were dropped with it.)
 
 - The engine ([`web/engine.js`](src/chordstream/web/engine.js)) is a port of the Python live path:
   causal CQT, the ONNX step model (onnxruntime-web, in a Web Worker), causal HMM, beat tracker, key
@@ -439,43 +410,26 @@ gh release upload model-v12 site/chordstream-v12-web.zip
 Local test build: `cd tests/web; npm ci; npm run parity` (needs `tests/web/make_reference.py` output in
 `data/webtest`), then `python scripts/build_site.py --model site/model --out _site` and serve `_site`.
 
-## Using it from other devices on your LAN
+## Chord events
 
-Browsers only allow microphone access on
-HTTPS pages or localhost, so serve HTTPS with a self-signed certificate:
-
-```powershell
-openssl req -x509 -newkey rsa:2048 -nodes -days 825 -keyout data/certs/key.pem -out data/certs/cert.pem `
-  -subj "/CN=chordstream" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:<your LAN IP>"
-uv run chordstream serve --host 0.0.0.0 --ssl-certfile data/certs/cert.pem --ssl-keyfile data/certs/key.pem
-```
-
-Open `https://<your LAN IP>:8000` and accept the certificate warning once per device. "Now
-playing" and the lyrics follow the media playing on the server PC.
-
-If Windows Firewall blocks Python, see [`tools/`](tools/): an admin script to allow it, or a Node
-relay on a port that's already open.
-
-## WebSocket protocol
-
-Send binary messages of little-endian float32 mono PCM at 16 kHz, in any chunk size.
-Each completed 40 ms frame returns one JSON event:
+The engine (`Engine.push` in `web/engine.js`, `ChordStream.push` in `stream.py`) takes float32 mono
+PCM at 16 kHz in any chunk size and returns one event per completed 40 ms frame:
 `{"type":"chord","time":12.36,"label":"A:min","name":"Am","confidence":0.94,"raw_index":22,"changed":false,"delay":0.12,"key":"C / Am",...}`.
 
 | Field | Meaning |
 |---|---|
 | `time` | stream time at the end of the newest frame (s) |
 | `label`, `name`, `index` | chord of the audio at `time − delay` (Harte label, key-spelled display name, class) |
-| `delay` | the model's label delay in seconds (0.12 for v7) |
+| `delay` | the model's label delay in seconds (0.12 for v12) |
 | `key` | estimated key signature, e.g. `"E / C#m"`, once known |
 | `beat`, `bpm`, `beat_conf` | causal beat tracker (display only) |
 | `display_label`, `display_name` | the steady-display chord (evidence hold, F05), shown big unless Instant is ticked |
 | `beat_label`, `beat_name`, `beat_t0` | set when a chord is committed to the sheet: the chord and its start time (described time) |
-Send the text `reset` between songs. Set `CHORDSTREAM_ONLY_CHANGES=1` to receive only chord changes.
+Call `reset()` between songs.
 
 ## Tests
 
 `uv run pytest`: chord parsing (Harte, free text, extended), UG extraction, CQT pitch alignment,
 streaming/offline CQT parity, CNN/Transformer causality, KV-cache step (newest-frame CNN cone only) ≡ full forward (also for the
 optional sheet head), label-delay targets and realignment, HMM anti-flicker, key-aware spelling.
-Browser engine vs Python engine: `cd tests/web; npm ci; npm run parity` (see the browser-only section).
+Browser engine vs Python engine: `cd tests/web; npm ci; npm run parity` (see the browser version section).

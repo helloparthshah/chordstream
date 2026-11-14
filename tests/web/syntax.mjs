@@ -13,6 +13,6 @@ for (const page of ['index.html', 'annotate.html', 'bench.html']) {
     n++;
   }
 }
-for (const f of ['sheet.js', 'api-local.js']) { new Function(readFileSync(new URL(f, web), 'utf8')); n++; }
+for (const f of ['sheet.js', 'lyrics.js']) { new Function(readFileSync(new URL(f, web), 'utf8')); n++; }
 await import(new URL('engine.js', web));
 console.log(`syntax ok (${n} scripts + engine.js)`);

@@ -35,6 +35,7 @@
   .pill.engine.err .dot { background: var(--bad); }
   .seg { display: inline-flex; margin-left: 2px; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; flex: none; }
   .seg button { font: inherit; font-size: 11px; line-height: 1.2; padding: 2px 8px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+  .seg[hidden] { display: none; }
   .seg button.on { background: var(--accent); color: #fff; }
   .seg button:disabled { cursor: default; opacity: .55; }
   .seg button.on:disabled { opacity: 1; }
@@ -218,7 +219,6 @@
         <div class="offset" title="Shift lyrics against the music. Or click a lyric line the moment it is sung.">
           <button id="offminus" aria-label="Lyrics earlier">−</button><span id="offset">+0.0 s</span><button id="offplus" aria-label="Lyrics later">+</button>
         </div>
-        <label class="toggle" title="Use recognised vocals to correct the lyrics offset automatically"><input type="checkbox" id="autosync" checked> Auto-sync</label>
         <button id="copysheet">Copy</button>
         <button id="dlsheet">Download</button>
         <button id="clearsheet" title="Remove recorded chords">Clear</button>
@@ -242,18 +242,17 @@
     <b>System audio in Firefox:</b> Firefox screen sharing carries no audio, so pick a loopback input in the list
     (e.g. <b>Voicemeeter Out B1</b> or <b>Stereo Mix</b>) and press Listen.
     <b>Chrome / Edge:</b> "System audio" works directly: share a tab, or the entire screen with "Share system audio" ticked.
+    <b>Phones:</b> browsers can't share other apps' audio, so use the mic or play the song as a file here.
   </footer>
 </main>
 
-<script src="static/api-local.js"></script>
+<script src="static/lyrics.js"></script>
 <script src="static/sheet.js"></script>
 <script>
-// Browser-only mode (GitHub Pages build, or ?local): the chord engine runs in this browser in a Web
-// Worker (static/engine.js), on the CPU (WebAssembly) or the GPU (WebGPU), chosen with the CPU/GPU
+// The chord engine runs in this browser in a Web Worker (static/engine.js), on the CPU (WebAssembly) or the GPU (WebGPU), chosen with the CPU/GPU
 // toggle in the model badge (remembered per device; default CPU, which loads fastest and is usually
-// faster for this one-frame-at-a-time model: phone CPU 15 ms vs GPU 40 ms per step). LocalSocket
-// stands in for the server's WebSocket so the rest of the page is unchanged.
-const LOCAL = !!window.CHORDSTREAM_LOCAL || new URLSearchParams(location.search).has('local');
+// faster for this one-frame-at-a-time model: phone CPU 15 ms vs GPU 40 ms per step). EngineSocket
+// wraps the worker in a small socket-like object (send audio, receive chord events).
 const HAS_GPU = !!navigator.gpu;
 let engineWorker = null, engineReady = null, engineInfo = null, engineMs = 0, engineBusy = false;
 function savedProvider() {
@@ -305,7 +304,7 @@ function renderToggle() {
   }
   $('useGpu').title = HAS_GPU ? 'Run the model on the GPU (WebGPU)' : 'This browser has no WebGPU';
 }
-class LocalSocket {
+class EngineSocket {
   constructor() {
     this.readyState = 0; this.binaryType = 'arraybuffer';
     this.onopen = this.onmessage = this.onclose = this.onerror = null;
@@ -347,7 +346,7 @@ function setEngineLive(ms) {
   $('engine').classList.toggle('slow', ms != null && ms > 40);
   $('engtext').textContent = ms == null ? engineIdle : `${engineInfo.bundle} · ${ms.toFixed(0)} ms`;
 }
-if (LOCAL) addEventListener('DOMContentLoaded', () => {
+addEventListener('DOMContentLoaded', () => {
   $('useCpu').onclick = () => setProvider('wasm');
   $('useGpu').onclick = () => setProvider('webgpu');
   loadEngine();
@@ -380,7 +379,7 @@ const AUDIO = { echoCancellation: false, noiseSuppression: false, autoGainContro
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
 let session = null, lastName = null, chordTones = new Set(), rootPc = -1, spelled = {};
-// The progression strip, chord sheet and diagram follow the server's per-beat chords
+// The progression strip, chord sheet and diagram follow the engine's chord-sheet commits
 // (posteriors averaged over each beat, reported when the beat ends): one beat late, but
 // more accurate and far less flickery than per-frame decisions. The big display follows them too
 // unless "Instant" is ticked.
@@ -416,7 +415,7 @@ function setButtons(enabled) { $('mic').disabled = $('sys').disabled = !enabled;
 // ---------------------------------------------------------------- chord display
 const fmtTime = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
 
-// Steady mode (default, F05): the big chord is the server's evidence-hold chord (display_*): it only
+// Steady mode (default, F05): the big chord is the engine's evidence-hold chord (display_*): it only
 // waits before leaving a chord the network still finds plausible, which removes ~70% of blips for
 // ~0.6 pt accuracy; the live per-frame guess is shown small underneath, like a provisional caption.
 // Instant mode shows every decision in the big display.
@@ -450,7 +449,7 @@ function renderBig(name, label) {
 function showChord(e) {
   if (e.beat_label && e.beat_name !== lastName) commitBeatChord(e);
   if (e.display_label) committed = { name: e.display_name, label: e.display_label };
-  else if (e.beat_label) committed = { name: e.beat_name, label: e.beat_label };  // older servers
+  else if (e.beat_label) committed = { name: e.beat_name, label: e.beat_label };
   if (instant || !committed) renderBig(e.name, e.label);
   else renderBig(committed.name, committed.label);
   const live = $('live');
@@ -565,7 +564,7 @@ function drawFrame(an, sr) {
 }
 
 // ---------------------------------------------------------------- beat + timeline
-// The server's causal beat tracker flags frames where a beat falls. Display only: it does
+// The engine's causal beat tracker flags frames where a beat falls. Display only: it does
 // not affect recognition (tempo can lock to half-time or the off-beat on some songs).
 const beatState = { beats: [], segs: [], lastT: 0, lastPerf: 0 };
 const LOCK = 0.3;
@@ -668,26 +667,20 @@ async function startInner(source, label) {
   }
   const stopStream = () => stream && stream.getTracks().forEach((t) => t.stop());
 
-  const ws = LOCAL ? new LocalSocket() : new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  const ws = new EngineSocket();
   ws.binaryType = 'arraybuffer';
   let events = 0, rateT = performance.now();
-  const sentAt = [];
   ws.onmessage = (m) => {
     const e = JSON.parse(m.data);
-    if (e.type === 'words') { window.sheet?.onWords(e); return; }
     if (e.type !== 'chord') return;
-    window.sheet?.onEvent(e);
     onBeatEvent(e);
     events++;
-    const t0 = sentAt.shift();
-    if (!LOCAL && t0) $('lat').textContent = `round trip ${(performance.now() - t0).toFixed(0)} ms`;
     showChord(e);
   };
-  setStatus(LOCAL ? (engineInfo ? 'Starting…' : 'Waiting for the model…') : 'Connecting…');
+  setStatus(engineInfo ? 'Starting…' : 'Waiting for the model…');
   const opened = await withTimeout(new Promise((r) => { ws.onopen = () => r(true); ws.onerror = () => r(false); }),
-                                   LOCAL ? 120000 : 10000, LOCAL ? 'loading the chord model' : 'connecting to the server').catch(() => false);
-  if (!opened) { setStatus(LOCAL ? 'Waiting for the chord model failed' : 'Server unreachable', 'err'); stopStream(); setButtons(true); return; }
-  window.sheet?.attachSocket(ws);
+                                   120000, 'loading the chord model').catch(() => false);
+  if (!opened) { setStatus('Waiting for the chord model failed', 'err'); stopStream(); setButtons(true); return; }
 
   // Live input: a 16 kHz context (the browser resamples). File: native rate so playback stays full
   // quality, with latencyHint "playback" (Chrome's regular output path rather than its low-latency
@@ -733,8 +726,6 @@ async function startInner(source, label) {
   node.port.onmessage = (m) => {
     if (ws.readyState !== 1) return;
     ws.send(m.data.buffer);
-    sentAt.push(performance.now());
-    if (sentAt.length > 50) sentAt.shift();
   };
   const an = ctx.createAnalyser(); an.fftSize = file ? 8192 : 4096; an.smoothingTimeConstant = 0.6;
   src.connect(an);
@@ -746,7 +737,7 @@ async function startInner(source, label) {
     catch (err) { if (!drawErr) { console.error('visualizer', err); drawErr = true; } }
     const now = performance.now();
     if (now - rateT > 1000) {
-      $('fps').textContent = events ? `${events} frames/s` : 'no frames from server';
+      $('fps').textContent = events ? `${events} frames/s` : 'no frames from the engine';
       events = 0; rateT = now;
     }
   };
@@ -757,7 +748,7 @@ async function startInner(source, label) {
     stopStream();
     if (player) { player.pause(); $('playerrow').replaceChildren(); URL.revokeObjectURL(fileUrl); window.sheet?.setLocal?.(null); }
     ctx.close(); ws.onclose = null; ws.close();
-    if (LOCAL) setEngineLive(null);
+    setEngineLive(null);
     document.body.classList.remove('live-mode', 'file-mode');
     setButtons(true);
     $('sig').textContent = 'No input'; $('sig').className = 'none';
