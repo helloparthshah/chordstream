@@ -160,6 +160,24 @@
   .block.inst { display: flex; align-items: baseline; gap: 10px; }
   .tag { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 650; }
   .plain { white-space: pre-wrap; font: inherit; color: var(--muted); }
+  .how { margin-top: 16px; padding: 18px 20px 20px; }
+  .how h2 { margin: 2px 0 6px; font-size: 20px; letter-spacing: -0.01em; }
+  .how p { margin: 6px 0; color: var(--muted); }
+  .how .lede { color: var(--fg); }
+  .pipe { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 14px 0 6px; }
+  .pipe span { padding: 5px 11px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); font-size: 13px; font-weight: 600; }
+  .pipe span.ml { border-color: var(--accent); color: var(--accent); }
+  .pipe i { color: var(--muted); font-style: normal; }
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin-top: 12px; }
+  .step { background: var(--panel-2); border-radius: 12px; padding: 12px 14px; }
+  .step b { display: block; margin-bottom: 3px; }
+  .step p { margin: 0; font-size: 13.5px; line-height: 1.5; }
+  .how h3 { margin: 18px 0 4px; font-size: 15px; }
+  .how ul { margin: 4px 0; padding-left: 18px; color: var(--muted); }
+  .how li { margin: 3px 0; }
+  .how a { color: var(--accent); }
+  .facts { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 14px; font-size: 13px; color: var(--muted); }
+  .facts b { color: var(--fg); }
   footer { margin-top: 18px; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
   footer b { color: var(--fg); font-weight: 600; }
   .stats { font-variant-numeric: tabular-nums; }
@@ -246,6 +264,44 @@
   <section class="card history">
     <div class="vizhead"><span class="label">Progression</span><span class="label stats" id="lat"></span></div>
     <div id="hist"><span class="empty">Chord changes will appear here.</span></div>
+  </section>
+
+  <section class="card how" id="how">
+    <span class="label">How it works</span>
+    <h2>Chords from audio it has already heard</h2>
+    <p class="lede">Every 40 ms, 25 times a second, Rubato turns the newest slice of sound into a chord.
+      It never waits for the rest of the song, so it can follow live playing. It runs entirely on this
+      device: the audio is never uploaded.</p>
+    <div class="pipe" aria-hidden="true">
+      <span>Audio</span><i>→</i><span>Note energies</span><i>→</i><span class="ml">CNN</span><i>→</i>
+      <span class="ml">Transformer</span><i>→</i><span>HMM</span><i>→</i><span>Chord</span>
+    </div>
+    <div class="steps">
+      <div class="step"><b>1 · Note energies</b><p>A constant-Q transform measures how loud each musical note is: 144 bins over 6 octaves, two per semitone. Every window ends at "now".</p></div>
+      <div class="step"><b>2 · CNN</b><p>A small convolutional network spots local patterns: which notes stack into a chord, which are just overtones, where notes start.</p></div>
+      <div class="step"><b>3 · Transformer</b><p>Adds context from the last ~32 s, so it knows the key and feel of the song when a moment is ambiguous. A KV cache keeps each step cheap.</p></div>
+      <div class="step"><b>4 · HMM smoothing</b><p>A hidden Markov model filters the guesses over time: chords tend to last, and some changes are far likelier than others. It runs forward only, so it adds no delay.</p></div>
+      <div class="step"><b>5 · Key and spelling</b><p>A rolling estimate of the key spells chords the way a musician would: G♯m in E major, D♭ in A♭ major.</p></div>
+      <div class="step"><b>6 · Display</b><p>The live chord, a steadier big chord that hides split-second blips, and a sheet that writes a chord down once it has held for half a second.</p></div>
+    </div>
+    <h3>How it was trained</h3>
+    <ul>
+      <li>First on synthetic audio: chord progressions rendered with random instruments, so the labels are exact.</li>
+      <li>Then on real recordings labelled by people: US Billboard hits (the McGill Billboard dataset) and 152 Bollywood songs whose chords come from guitar chord sheets, lined up to the audio.</li>
+      <li>Every song is shifted into all 12 keys and gets random EQ and bass cuts, so the model listens to harmony, not just the bass line.</li>
+    </ul>
+    <h3>What's different</h3>
+    <ul>
+      <li><b>vs. whole-song tools</b> (upload a track, get chords): those can look ahead and back over the entire recording. Rubato only uses what it has heard, plus a deliberate 120 ms, so it works live on anything you can point a mic at.</li>
+      <li><b>vs. classic live detectors</b> (match each instant against chord templates): Rubato uses a deep model with half a minute of memory and knows 109 chord types, not just major and minor.</li>
+    </ul>
+    <div class="facts">
+      <span><b>~82%</b> right (major/minor) on songs it never trained on</span>
+      <span><b>109</b> chord types</span>
+      <span><b>~2M</b> parameters</span>
+      <span><b>15–25 ms</b> per step on a phone or laptop CPU</span>
+      <span>Open source: <a href="https://github.com/helloparthshah/rubato">GitHub</a></span>
+    </div>
   </section>
 
   <footer>

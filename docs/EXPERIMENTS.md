@@ -1019,6 +1019,12 @@ Dates are the day the experiment ran.
   Mic or Play file.
 - CI runs `tests/web/syntax.mjs` (every inline page script parses) before deploying.
 
+### W07 · "How it works" section on the site · 2026-11-14
+- A card below the app: the pipeline (audio → note energies → CNN → Transformer → HMM → chord), one
+  short card per component, how it was trained, how it differs from whole-song tools and classic
+  live detectors, and headline numbers (~82% on unseen songs, 109 chord types, ~2M parameters,
+  15–25 ms per step). Same content as the README's walkthrough, condensed for visitors.
+
 ### W05 · Chord sheet polish · 2026-11-14
 - Chords starting up to 0.5 s before a lyric line now go on that line's first word (they used to
   sit alone at the end of the previous line, because chords land a beat ahead of the syllable and
