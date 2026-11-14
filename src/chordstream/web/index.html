@@ -427,7 +427,7 @@ function setStatus(text, kind = '') { $('status').textContent = text; $('pill').
 function setButtons(enabled) { $('mic').disabled = $('sys').disabled = !enabled; }
 
 // ---------------------------------------------------------------- chord display
-const fmtTime = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
+const fmtTime = (t) => { t = Math.max(0, t); return `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`; };
 
 // Steady mode (default, F05): the big chord is the engine's evidence-hold chord (display_*): it only
 // waits before leaving a chord the network still finds plausible, which removes ~70% of blips for

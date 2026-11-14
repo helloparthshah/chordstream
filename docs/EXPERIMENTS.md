@@ -1019,6 +1019,12 @@ Dates are the day the experiment ran.
   Mic or Play file.
 - CI runs `tests/web/syntax.mjs` (every inline page script parses) before deploying.
 
+### W05 · Chord sheet polish · 2026-11-14
+- Chords starting up to 0.5 s before a lyric line now go on that line's first word (they used to
+  sit alone at the end of the previous line, because chords land a beat ahead of the syllable and
+  lyric timestamps are approximate). Progression chips no longer show "-1:-0.0" for a first chord
+  that starts a few ms before 0.
+
 ### W04 · Renamed Rubato · 2026-11-14
 - The app is now **Rubato** (rubato: expressive, flexible tempo; the app follows real playing).
   Logo "Wave": three chord tones riding a stretched line (`scripts/make_icons.py` -> `web/icons/`:

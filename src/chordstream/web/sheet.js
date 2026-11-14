@@ -77,6 +77,7 @@
       return tok;
     });
   }
+  const LEAD = 0.5;          // s: chords this close before a line start go on that line
   const nextT = (i) => (i + 1 < st.lines.length ? st.lines[i + 1].t : Infinity);
 
   // Lyric-time start of every word in line i, from its character position within the line.
@@ -100,12 +101,14 @@
       blocks.push({ kind: 'inst', label: 'Chords', chords: take(Infinity) });
       return blocks;
     }
-    const intro = take(lines[0].t);
+    const intro = take(lines[0].t - LEAD);
     if (intro.length) blocks.push({ kind: 'inst', label: 'Intro', chords: intro, t: 0, end: lines[0].t });
 
     lines.forEach((line, i) => {
       const next = i + 1 < lines.length ? lines[i + 1].t : Infinity;
-      const inLine = take(next);
+      // A chord starting just before the next line belongs on that line's first word (chords
+      // usually land a beat ahead of the sung syllable and lyric timestamps are approximate).
+      const inLine = take(next - LEAD);
       if (!line.text) { // LRC blank line = instrumental break
         blocks.push({ kind: 'inst', label: 'Instrumental', chords: inLine, t: line.t, end: next });
         return;
