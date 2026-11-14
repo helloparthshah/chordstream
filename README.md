@@ -12,6 +12,8 @@ sus2, sus4) plus "no chord", and is trained on human-labelled data only: US Bill
 Bollywood songs whose chords come from Ultimate Guitar sheets. Chord names are spelled
 for the song's estimated key (G♯m in E major, D♭ in A♭ major).
 
+![Rubato recognising a C, G, Am, F progression live in the browser](image.png)
+
 ## How it works, step by step
 
 This section follows the sound from the microphone to the chord name on screen. Every step uses
