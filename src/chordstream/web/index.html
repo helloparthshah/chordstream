@@ -27,11 +27,20 @@
   .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
   .pill.live .dot { background: var(--good); animation: pulse 1.6s infinite; }
   .pill.err .dot { background: var(--bad); }
-  .pills { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
-  .pills .pill { max-width: min(60vw, 420px); }
+  header { flex-wrap: wrap; row-gap: 8px; }
+  .pills { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; margin-left: auto; }
+  .pills .pill { max-width: 100%; }
   .pill.engine.loading .dot { background: var(--warn); animation: pulse 1.2s infinite; }
   .pill.engine.ok .dot { background: var(--accent); }
   .pill.engine.err .dot { background: var(--bad); }
+  .seg { display: inline-flex; margin-left: 2px; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; flex: none; }
+  .seg button { font: inherit; font-size: 11px; line-height: 1.2; padding: 2px 8px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .seg button:disabled { cursor: default; opacity: .55; }
+  .seg button.on:disabled { opacity: 1; }
+  .pill.engine { overflow: visible; padding-right: 4px; }
+  .pill.engine.slow #engtext { color: var(--bad); font-weight: 600; }
+  .pill.engine.slow .dot { background: var(--bad); }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 60%, transparent); } 100% { box-shadow: 0 0 0 8px transparent; } }
 
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
@@ -153,7 +162,7 @@
       chordstream
     </div>
     <div class="pills">
-      <span id="engine" class="pill engine" hidden title="Where the chord model runs"><span class="dot"></span><span id="engtext">Model</span></span>
+      <span id="engine" class="pill engine" hidden title="Where the chord model runs"><span class="dot"></span><span id="engtext">Model</span><span class="seg" role="group" aria-label="Run the model on"><button id="useCpu" type="button">CPU</button><button id="useGpu" type="button">GPU</button></span></span>
       <span id="pill" class="pill"><span class="dot"></span><span id="status">Idle</span></span>
     </div>
   </header>
@@ -239,14 +248,26 @@
 <script src="static/api-local.js"></script>
 <script src="static/sheet.js"></script>
 <script>
-// Browser-only mode (GitHub Pages build, or ?local): the chord engine runs in this browser, on the
-// GPU through WebGPU when available, in a Web Worker (static/engine.js). LocalSocket stands in for
-// the server's WebSocket so the rest of the page is unchanged.
+// Browser-only mode (GitHub Pages build, or ?local): the chord engine runs in this browser in a Web
+// Worker (static/engine.js), on the CPU (WebAssembly) or the GPU (WebGPU), chosen with the CPU/GPU
+// toggle in the model badge (remembered per device; default CPU, which loads fastest and is usually
+// faster for this one-frame-at-a-time model: phone CPU 15 ms vs GPU 40 ms per step). LocalSocket
+// stands in for the server's WebSocket so the rest of the page is unchanged.
 const LOCAL = !!window.CHORDSTREAM_LOCAL || new URLSearchParams(location.search).has('local');
-let engineWorker = null, engineReady = null, engineInfo = null, engineMs = 0;
+const HAS_GPU = !!navigator.gpu;
+let engineWorker = null, engineReady = null, engineInfo = null, engineMs = 0, engineBusy = false;
+function savedProvider() {
+  const q = new URLSearchParams(location.search).get('provider');
+  let p = q;
+  if (!p) { try { p = localStorage.getItem('provider'); } catch {} }
+  return p === 'webgpu' && HAS_GPU ? 'webgpu' : 'wasm';
+}
+let engineProvider = savedProvider();
 function loadEngine() {
   if (engineReady) return engineReady;
-  const provider = new URLSearchParams(location.search).get('provider') || 'auto';
+  const provider = engineProvider;
+  renderToggle();
+  setEngine(`Loading on ${provider === 'webgpu' ? 'GPU' : 'CPU'}…`, 'loading', 'Downloading and starting the chord model');
   engineWorker = new Worker(new URL('static/engine-worker.js', location.href), { type: 'module' });
   engineReady = new Promise((resolve, reject) => {
     engineWorker.onmessage = (m) => {
@@ -257,14 +278,32 @@ function loadEngine() {
   engineWorker.onerror = (e) => setEngine('Model failed to start', 'err', e.message || 'worker error');
   engineWorker.postMessage({ type: 'init', provider });
   engineReady.then((i) => {
-    const t = i.timing || {}, f = (x) => `${x.toFixed(0)} ms`;
-    const where = i.provider === 'webgpu' ? 'GPU' : 'CPU';
-    const cmp = t.webgpu != null && t.wasm != null ? ` Measured at load: GPU ${f(t.webgpu)}, CPU ${f(t.wasm)} per step.` : '';
-    engineIdle = `${i.bundle} · ${where}`;
-    setEngine(engineIdle, 'ok',
-              `Chord model ${i.bundle} runs on this device's ${where} (${i.provider === 'webgpu' ? 'WebGPU' : 'WebAssembly'}).${cmp} Budget: 40 ms per step.`);
-  }, (err) => setEngine('Model failed to load', 'err', err.message));
+    engineIdle = i.bundle;
+    setEngine(engineIdle, 'ok', `Chord model ${i.bundle} runs on this device's ${i.provider === 'webgpu' ? 'GPU (WebGPU)' : 'CPU (WebAssembly)'}. ` +
+              'While listening it shows the compute time per 40 ms step.');
+  }, (err) => {
+    setEngine(`${provider === 'webgpu' ? 'GPU' : 'CPU'} failed`, 'err', err.message);
+    engineReady = null;  // let the toggle retry
+  });
   return engineReady;
+}
+// CPU/GPU toggle: restarts the model on the other backend (not while listening).
+function setProvider(p) {
+  if (p === engineProvider || (p === 'webgpu' && !HAS_GPU) || engineBusy) return;
+  engineProvider = p;
+  try { localStorage.setItem('provider', p); } catch {}
+  if (engineWorker) engineWorker.terminate();
+  engineWorker = null; engineReady = null; engineInfo = null;
+  loadEngine();
+}
+function renderToggle() {
+  for (const [id, p] of [['useCpu', 'wasm'], ['useGpu', 'webgpu']]) {
+    const b = $(id);
+    b.classList.toggle('on', engineProvider === p);
+    b.setAttribute('aria-pressed', String(engineProvider === p));
+    b.disabled = engineBusy || (p === 'webgpu' && !HAS_GPU);
+  }
+  $('useGpu').title = HAS_GPU ? 'Run the model on the GPU (WebGPU)' : 'This browser has no WebGPU';
 }
 class LocalSocket {
   constructor() {
@@ -282,6 +321,7 @@ class LocalSocket {
         for (const e of d.events) this.onmessage && this.onmessage({ data: JSON.stringify(e) });
       };
       this.readyState = 1;
+      engineBusy = true; renderToggle();
       this.onopen && this.onopen();
     }, () => { this.readyState = 3; this.onerror && this.onerror(); });
   }
@@ -291,9 +331,9 @@ class LocalSocket {
     const audio = new Float32Array(data);
     engineWorker.postMessage({ type: 'audio', audio }, [audio.buffer]);
   }
-  close() { this.readyState = 3; }
+  close() { this.readyState = 3; engineBusy = false; renderToggle(); }
 }
-// The engine badge (header) is about the model; the status pill is about the audio.
+// The model badge (header) is about the model; the status pill is about the audio.
 function setEngine(text, kind, title) {
   const b = $('engine');
   b.hidden = false; b.className = `pill engine ${kind}`;
@@ -303,10 +343,15 @@ function setEngine(text, kind, title) {
 let engineIdle = '';
 function setEngineLive(ms) {
   if (!engineInfo) return;
-  if (ms == null) { $('engtext').textContent = engineIdle; return; }
-  $('engtext').textContent = `${engineInfo.bundle} · ${engineInfo.provider === 'webgpu' ? 'GPU' : 'CPU'} ${ms.toFixed(0)} ms`;
+  // Over 40 ms per 40 ms step the engine falls behind real time: show it in red.
+  $('engine').classList.toggle('slow', ms != null && ms > 40);
+  $('engtext').textContent = ms == null ? engineIdle : `${engineInfo.bundle} · ${ms.toFixed(0)} ms`;
 }
-if (LOCAL) addEventListener('DOMContentLoaded', () => { setEngine('Loading model…', 'loading', 'Downloading and starting the chord model'); loadEngine(); });
+if (LOCAL) addEventListener('DOMContentLoaded', () => {
+  $('useCpu').onclick = () => setProvider('wasm');
+  $('useGpu').onclick = () => setProvider('webgpu');
+  loadEngine();
+});
 const worklet = `
 class Tap extends AudioWorkletProcessor {
   constructor(o) {

@@ -1009,8 +1009,11 @@ Dates are the day the experiment ran.
   page ran was the E40 training job plus the copy engine that hybrid-graphics laptops use to move
   browser frames to the integrated GPU (the same with the model stopped); the model's own 3D/compute
   use was ~1%.
-- **Backend choice:** "auto" times 6 steps on each backend (after 3 warm-up steps) and keeps the
-  faster one; the page shows both times. `?provider=webgpu|wasm` forces one.
+- **Backend choice:** first an automatic choice (time a few steps on each backend at load, keep the
+  faster; 5–10 s to load), then, at the user's request, a CPU / GPU toggle in the model badge
+  (default CPU, remembered per device, locked while listening): load 2–3 s. The badge shows the live
+  compute time per step, red above the 40 ms budget. `Engine.load(..., {provider: 'auto'})` still
+  exists (used by bench.html-style checks).
 - **Phones and system audio:** mobile browsers have no `getDisplayMedia`, so a page cannot hear other
   apps there. The button now says so (it used to fail with "Cancelled (TypeError)") and points to
   Mic or Play file.
