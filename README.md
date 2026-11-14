@@ -413,7 +413,8 @@ are in [`experiments/`](experiments/).
 audio never leaves the device. The model runs on the GPU through WebGPU (Chrome, Edge, recent
 Safari and Firefox) or on the CPU through WebAssembly, whichever is faster on the device: it times a few steps of
 each at load. One step is so small that the CPU often wins (a phone: CPU 15 ms vs GPU 40 ms per
-40 ms frame; a laptop CPU about 20 ms). The page shows both times and the backend in use; add
+40 ms frame; a laptop CPU about 20 ms). A badge in the header shows the model, where it runs and its live compute time per step (hover
+for both load-time measurements), separate from the audio status; add
 `?provider=webgpu` or `?provider=wasm` to force one. Phone browsers can't share other apps' audio
 with a web page, so on a phone use the mic or play the song as a file in the page. Otherwise mic,
 system audio and audio files work as in the server version, and lyrics come straight from LRCLIB. Not available without the desktop server:

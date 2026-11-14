@@ -27,6 +27,11 @@
   .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
   .pill.live .dot { background: var(--good); animation: pulse 1.6s infinite; }
   .pill.err .dot { background: var(--bad); }
+  .pills { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+  .pills .pill { max-width: min(60vw, 420px); }
+  .pill.engine.loading .dot { background: var(--warn); animation: pulse 1.2s infinite; }
+  .pill.engine.ok .dot { background: var(--accent); }
+  .pill.engine.err .dot { background: var(--bad); }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 60%, transparent); } 100% { box-shadow: 0 0 0 8px transparent; } }
 
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
@@ -147,7 +152,10 @@
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 10v4M8 6v12M12 9v6M16 4v16M20 8v8"/></svg>
       chordstream
     </div>
-    <span id="pill" class="pill"><span class="dot"></span><span id="status">Idle</span></span>
+    <div class="pills">
+      <span id="engine" class="pill engine" hidden title="Where the chord model runs"><span class="dot"></span><span id="engtext">Model</span></span>
+      <span id="pill" class="pill"><span class="dot"></span><span id="status">Idle</span></span>
+    </div>
   </header>
 
   <section class="card controls">
@@ -246,14 +254,16 @@ function loadEngine() {
       else if (m.data.type === 'error') reject(new Error(m.data.message));
     };
   });
-  engineWorker.onerror = (e) => setStatus(`Engine failed to start: ${e.message || 'worker error'}`, 'err');
+  engineWorker.onerror = (e) => setEngine('Model failed to start', 'err', e.message || 'worker error');
   engineWorker.postMessage({ type: 'init', provider });
   engineReady.then((i) => {
-    const t = i.timing || {}, f = (x) => (x == null ? null : `${x.toFixed(0)} ms`);
-    const cmp = t.webgpu != null && t.wasm != null ? `; per step GPU ${f(t.webgpu)}, CPU ${f(t.wasm)}` : '';
-    if (!session) setStatus(`Ready · chord model runs on this device (${i.provider === 'webgpu' ? 'GPU, WebGPU' : 'CPU, WebAssembly'}${cmp})`);
-  },
-                   (err) => setStatus(`Model failed to load: ${err.message}`, 'err'));
+    const t = i.timing || {}, f = (x) => `${x.toFixed(0)} ms`;
+    const where = i.provider === 'webgpu' ? 'GPU' : 'CPU';
+    const cmp = t.webgpu != null && t.wasm != null ? ` Measured at load: GPU ${f(t.webgpu)}, CPU ${f(t.wasm)} per step.` : '';
+    engineIdle = `${i.bundle} · ${where}`;
+    setEngine(engineIdle, 'ok',
+              `Chord model ${i.bundle} runs on this device's ${where} (${i.provider === 'webgpu' ? 'WebGPU' : 'WebAssembly'}).${cmp} Budget: 40 ms per step.`);
+  }, (err) => setEngine('Model failed to load', 'err', err.message));
   return engineReady;
 }
 class LocalSocket {
@@ -265,9 +275,10 @@ class LocalSocket {
       engineWorker.postMessage({ type: 'reset' });
       engineWorker.onmessage = (m) => {
         const d = m.data;
-        if (d.type === 'error') { console.error('engine', d.message); setStatus(`Engine error: ${d.message}`, 'err'); return; }
+        if (d.type === 'error') { console.error('engine', d.message); setEngine('Model error', 'err', d.message); return; }
         if (d.type !== 'events' || this.readyState !== 1) return;
         engineMs = d.ms;
+        setEngineLive(d.ms);
         for (const e of d.events) this.onmessage && this.onmessage({ data: JSON.stringify(e) });
       };
       this.readyState = 1;
@@ -282,7 +293,20 @@ class LocalSocket {
   }
   close() { this.readyState = 3; }
 }
-if (LOCAL) addEventListener('DOMContentLoaded', () => { setStatus('Loading the chord model…'); loadEngine(); });
+// The engine badge (header) is about the model; the status pill is about the audio.
+function setEngine(text, kind, title) {
+  const b = $('engine');
+  b.hidden = false; b.className = `pill engine ${kind}`;
+  $('engtext').textContent = text;
+  if (title) b.title = title;
+}
+let engineIdle = '';
+function setEngineLive(ms) {
+  if (!engineInfo) return;
+  if (ms == null) { $('engtext').textContent = engineIdle; return; }
+  $('engtext').textContent = `${engineInfo.bundle} · ${engineInfo.provider === 'webgpu' ? 'GPU' : 'CPU'} ${ms.toFixed(0)} ms`;
+}
+if (LOCAL) addEventListener('DOMContentLoaded', () => { setEngine('Loading model…', 'loading', 'Downloading and starting the chord model'); loadEngine(); });
 const worklet = `
 class Tap extends AudioWorkletProcessor {
   constructor(o) {
@@ -611,14 +635,13 @@ async function startInner(source, label) {
     onBeatEvent(e);
     events++;
     const t0 = sentAt.shift();
-    if (LOCAL) $('lat').textContent = `${engineInfo?.provider === 'webgpu' ? 'GPU' : 'CPU'} ${engineMs.toFixed(1)} ms/frame`;
-    else if (t0) $('lat').textContent = `round trip ${(performance.now() - t0).toFixed(0)} ms`;
+    if (!LOCAL && t0) $('lat').textContent = `round trip ${(performance.now() - t0).toFixed(0)} ms`;
     showChord(e);
   };
-  setStatus('Connecting…');
+  setStatus(LOCAL ? (engineInfo ? 'Starting…' : 'Waiting for the model…') : 'Connecting…');
   const opened = await withTimeout(new Promise((r) => { ws.onopen = () => r(true); ws.onerror = () => r(false); }),
                                    LOCAL ? 120000 : 10000, LOCAL ? 'loading the chord model' : 'connecting to the server').catch(() => false);
-  if (!opened) { setStatus(LOCAL ? 'Chord model failed to load' : 'Server unreachable', 'err'); stopStream(); setButtons(true); return; }
+  if (!opened) { setStatus(LOCAL ? 'Waiting for the chord model failed' : 'Server unreachable', 'err'); stopStream(); setButtons(true); return; }
   window.sheet?.attachSocket(ws);
 
   // Live input: a 16 kHz context (the browser resamples). File: native rate so playback stays full
@@ -689,6 +712,7 @@ async function startInner(source, label) {
     stopStream();
     if (player) { player.pause(); $('playerrow').replaceChildren(); URL.revokeObjectURL(fileUrl); window.sheet?.setLocal?.(null); }
     ctx.close(); ws.onclose = null; ws.close();
+    if (LOCAL) setEngineLive(null);
     document.body.classList.remove('live-mode', 'file-mode');
     setButtons(true);
     $('sig').textContent = 'No input'; $('sig').className = 'none';
