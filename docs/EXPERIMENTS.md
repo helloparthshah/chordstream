@@ -1019,6 +1019,28 @@ Dates are the day the experiment ran.
   Mic or Play file.
 - CI runs `tests/web/syntax.mjs` (every inline page script parses) before deploying.
 
+### W06 · Can speech-to-text sync the lyric sheet? · 2026-11-14
+- Question: can a small speech model hear enough sung words to place the playing position in the
+  lyrics? Test (`experiments/analysis_lyric_sync.py`, set from `lyric_eval_set.py`): 8 s windows
+  from test songs with synced lyrics (420 English windows, 273 Hindi). Recognised words are matched
+  phonetically (Hindi lyrics romanised, IAST with schwa deletion) and vote on an offset. A window is
+  correct if it locks within ±1.5 s, wrong if it locks elsewhere, otherwise "no lock".
+
+| Engine (CPU) | English correct / wrong | Hindi correct / wrong | s per 8 s window |
+|---|---|---|---|
+| Vosk (grammar = song's lyrics) | 17.6% / 9.8% | 0.7% / – | – |
+| Web Speech (Chrome, cloud) | 18.8% / 28.1% | 18.8% / 37.5% | live |
+| Whisper tiny | 33.6% / 28.1% | 3.3% / 16.1% | 1.6 (en), 5.2 (hi) |
+| Whisper base | 41.2% / 36.0% | 4.8% / 30.0% | 3.6, 9.2 |
+| Whisper small | 43.8% / 34.3% | 13.6% / 46.5% | 5.4, 15.7 |
+
+- Verdict: **not shipped.** Even the best (Whisper small, 244M parameters, too slow to run
+  alongside the chord model in a browser) is wrong about as often as it is right on English, and
+  worse than right on Hindi: sung words over a full mix are mostly misheard. A wrong lock moves the
+  sheet to the wrong line, which is worse than the current character-position timing. A better
+  route, if revisited: match the recognised chord sequence against the song's chord sheet (no
+  vocals needed), or use a vocal-separated input.
+
 ### W07 · "How it works" section on the site · 2026-11-14
 - A card below the app: the pipeline (audio → note energies → CNN → Transformer → HMM → chord), one
   short card per component, how it was trained, how it differs from whole-song tools and classic
