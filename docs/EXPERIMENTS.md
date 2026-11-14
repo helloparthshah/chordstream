@@ -1019,6 +1019,15 @@ Dates are the day the experiment ran.
   Mic or Play file.
 - CI runs `tests/web/syntax.mjs` (every inline page script parses) before deploying.
 
+### W03 · Display decoupled from the engine · 2026-11-14
+- The timeline's "now", the beat pulse and the big-chord updates were driven by engine events, so a
+  slow engine (e.g. a busy GPU) stalled the animations, and sheet chords were placed relative to
+  event arrival, i.e. shifted later by the engine's lag. Now an audio clock (16 kHz samples captured,
+  interpolated) drives drawing once per animation frame; events only update state. The pulse is
+  extrapolated from the tracker's last beat and tempo; the unanswered stretch of the timeline is a
+  faint band; sheet placement uses audio-clock age. Checked with the GPU 9 s behind (timeline and
+  bars keep moving) and on the CPU (engine within 0.04 s of the clock, chords match player time).
+
 ### W02 · Live server retired · 2026-11-14
 - With the browser version live, the Python live server was removed at the user's request: the
   WebSocket engine endpoint, Whisper word alignment (`asr.py`, `serve --asr`), Windows "now playing"

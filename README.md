@@ -386,7 +386,9 @@ CPU (WebAssembly, the default) or GPU (WebGPU: Chrome, Edge, recent Safari and F
 is remembered per device. One step is so small that the CPU is often the faster (a phone: CPU 15 ms
 vs GPU 40 ms per 40 ms frame; a laptop CPU about 20 ms). While listening, the badge shows the
 compute time per step, in red above 40 ms (the engine is falling behind real time). The badge is
-separate from the audio status. `?provider=webgpu` or `?provider=wasm` overrides the toggle. Phone
+separate from the audio status. The display runs on an audio clock (audio captured so far), not on
+engine events: the timeline, beat pulse and visualizer stay smooth if the engine falls behind, the
+not-yet-recognised stretch shows as a faint band, and chords are placed on the lyrics by audio time. `?provider=webgpu` or `?provider=wasm` overrides the toggle. Phone
 browsers can't share other apps' audio
 with a web page, so on a phone use the mic or play the song as a file in the page. Lyrics come
 straight from LRCLIB. (An earlier desktop server added Windows "now playing" detection and Whisper

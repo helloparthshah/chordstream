@@ -317,7 +317,7 @@ class EngineSocket {
         if (d.type !== 'events' || this.readyState !== 1) return;
         engineMs = d.ms;
         setEngineLive(d.ms);
-        for (const e of d.events) this.onmessage && this.onmessage({ data: JSON.stringify(e) });
+        for (const e of d.events) this.onmessage && this.onmessage(e);
       };
       this.readyState = 1;
       engineBusy = true; renderToggle();
@@ -446,10 +446,24 @@ function renderBig(name, label) {
   }
 }
 
-function showChord(e) {
+// Audio clock: seconds of audio captured so far (16 kHz chunks from the worklet), interpolated
+// between chunks. The display runs on it; engine events describe times at or behind it.
+const audioClock = { samples: 0, perf: 0 };
+function audioNow() {
+  if (!audioClock.perf) return 0;
+  return audioClock.samples / 16000 + Math.min(0.1, (performance.now() - audioClock.perf) / 1000);
+}
+let pendingChord = null;
+function takeChord(e) {  // every event: sheet commits must not be skipped
   if (e.beat_label && e.beat_name !== lastName) commitBeatChord(e);
   if (e.display_label) committed = { name: e.display_name, label: e.display_label };
   else if (e.beat_label) committed = { name: e.beat_name, label: e.beat_label };
+  pendingChord = e;
+}
+function drawChord() {  // once per animation frame, newest event only
+  const e = pendingChord;
+  if (!e) return;
+  pendingChord = null;
   if (instant || !committed) renderBig(e.name, e.label);
   else renderBig(committed.name, committed.label);
   const live = $('live');
@@ -464,7 +478,8 @@ function showChord(e) {
 function commitBeatChord(e) {
   lastName = e.beat_name;
   $('diagram').innerHTML = window.chordDiagram ? window.chordDiagram(e.beat_label) : '';
-  window.sheet?.addChord(e.beat_name, e.beat_label, e.time - e.beat_t0);
+  // Age against the audio clock, so engine lag doesn't shift chords later on the lyrics.
+  window.sheet?.addChord(e.beat_name, e.beat_label, Math.max(0, audioNow() - e.beat_t0));
   const hist = $('hist');
   hist.querySelector('.empty')?.remove();
   const chip = document.createElement('span');
@@ -566,23 +581,41 @@ function drawFrame(an, sr) {
 // ---------------------------------------------------------------- beat + timeline
 // The engine's causal beat tracker flags frames where a beat falls. Display only: it does
 // not affect recognition (tempo can lock to half-time or the off-beat on some songs).
-const beatState = { beats: [], segs: [], lastT: 0, lastPerf: 0 };
+const beatState = { beats: [], segs: [], lastT: 0, info: null, nextPulse: 0 };
 const LOCK = 0.3;
 function onBeatEvent(e) {
   const b = beatState, conf = e.beat_conf ?? 0;
-  b.lastT = e.time; b.lastPerf = performance.now();
-  if (e.beat) {
-    b.beats.push({ t: e.time, c: conf });
-    if (conf >= LOCK) { const d = $('pulse'); d.classList.remove('on'); void d.offsetWidth; d.classList.add('on'); }
-  }
+  b.lastT = e.time;
+  b.info = { conf, bpm: e.bpm, key: e.key };
+  if (e.beat) b.beats.push({ t: e.time, c: conf });
   const last = b.segs[b.segs.length - 1];
   if (!last || last.name !== e.name) b.segs.push({ t: e.time - (e.delay || 0) - 0.04, name: e.name, label: e.label });
   const cut = e.time - 8;
   while (b.beats.length && b.beats[0].t < cut) b.beats.shift();
   while (b.segs.length > 1 && b.segs[1].t < cut) b.segs.shift();
-  $('bpm').textContent = conf >= LOCK && e.bpm ? `${Math.round(e.bpm)} BPM` : 'finding beat…';
-  $('key').textContent = e.key ? ` · key ${e.key}` : '';
-  $('beatrow').classList.toggle('locked', conf >= LOCK);
+}
+// Per animation frame: BPM/key text, and the pulse dot on the audio clock. Beats are extrapolated
+// from the tracker's last beat and tempo, so the pulse stays on time even when events arrive late.
+let beatText = '';
+function drawBeat() {
+  const b = beatState, i = b.info;
+  if (!i) return;
+  const locked = i.conf >= LOCK && i.bpm > 0;
+  const text = `${locked ? `${Math.round(i.bpm)} BPM` : 'finding beat…'}|${i.key || ''}`;
+  if (text !== beatText) {
+    beatText = text;
+    $('bpm').textContent = locked ? `${Math.round(i.bpm)} BPM` : 'finding beat…';
+    $('key').textContent = i.key ? ` · key ${i.key}` : '';
+    $('beatrow').classList.toggle('locked', locked);
+  }
+  const last = b.beats[b.beats.length - 1];
+  if (!locked || !last) return;
+  const period = 60 / i.bpm, now = audioNow();
+  if (b.nextPulse < last.t) b.nextPulse = last.t;  // a fresh beat re-anchors the grid
+  if (now >= b.nextPulse) {
+    if (now - b.nextPulse < period) { const d = $('pulse'); d.classList.remove('on'); void d.offsetWidth; d.classList.add('on'); }
+    b.nextPulse += period * Math.max(1, Math.ceil((now - b.nextPulse) / period + 1e-6));
+  }
 }
 function chordColor(label) {
   const [root, q] = (label || '').split(':');
@@ -600,10 +633,13 @@ function drawTimeline() {
     g.fillText('beats and chords will scroll here', w / 2, top + (h - top) / 2 + 4);
     return;
   }
-  const now = b.lastT + Math.min(0.2, (performance.now() - b.lastPerf) / 1000);
+  // "now" is the audio clock. Chords are known up to the engine's last frame (minus the label delay);
+  // the stretch after that is audio the engine hasn't answered yet, drawn as a faint band.
+  const now = Math.max(audioNow(), b.lastT);
   const X = (t) => w - ((now - t) / span) * w;
+  const known = b.segs.length ? Math.max(b.segs[b.segs.length - 1].t, b.lastT - 0.12) : b.lastT;
   b.segs.forEach((sg, i) => {
-    const end = i + 1 < b.segs.length ? b.segs[i + 1].t : now;
+    const end = i + 1 < b.segs.length ? b.segs[i + 1].t : known;
     if (end < now - span) return;
     const x0 = Math.max(0, X(sg.t)), x1 = Math.min(w, X(end));
     if (x1 - x0 < 3) return;  // too thin to draw (a one-frame flicker)
@@ -614,6 +650,10 @@ function drawTimeline() {
       g.fillText(sg.name, x0 + 6, top + (h - top) / 2 + 4);
     }
   });
+  if (now - known > 0.3) {
+    const x0 = Math.max(0, X(known));
+    g.fillStyle = css('--muted'); g.globalAlpha = .12; roundRect(g, x0 + 1, top, w - x0 - 2, h - top, 6); g.fill(); g.globalAlpha = 1;
+  }
   const accent = css('--accent');
   b.beats.forEach((bt) => {
     const x = X(bt.t);
@@ -670,12 +710,13 @@ async function startInner(source, label) {
   const ws = new EngineSocket();
   ws.binaryType = 'arraybuffer';
   let events = 0, rateT = performance.now();
-  ws.onmessage = (m) => {
-    const e = JSON.parse(m.data);
+  // Events only update state. Drawing runs once per animation frame against the audio clock, so a
+  // slow or bursty engine never stalls the timeline, the beat pulse or the visualizer.
+  ws.onmessage = (e) => {
     if (e.type !== 'chord') return;
     onBeatEvent(e);
     events++;
-    showChord(e);
+    takeChord(e);
   };
   setStatus(engineInfo ? 'Starting…' : 'Waiting for the model…');
   const opened = await withTimeout(new Promise((r) => { ws.onopen = () => r(true); ws.onerror = () => r(false); }),
@@ -724,6 +765,7 @@ async function startInner(source, label) {
     src.connect(node);
   }
   node.port.onmessage = (m) => {
+    audioClock.samples += m.data.length; audioClock.perf = performance.now();  // 16 kHz chunks
     if (ws.readyState !== 1) return;
     ws.send(m.data.buffer);
   };
@@ -733,7 +775,7 @@ async function startInner(source, label) {
   let raf, drawErr = false;
   const loop = () => {
     raf = requestAnimationFrame(loop);  // schedule first: a drawing error can never stop the loop
-    try { drawFrame(an, sr); drawTimeline(); }
+    try { drawChord(); drawBeat(); drawFrame(an, sr); drawTimeline(); }
     catch (err) { if (!drawErr) { console.error('visualizer', err); drawErr = true; } }
     const now = performance.now();
     if (now - rateT > 1000) {
@@ -755,7 +797,8 @@ async function startInner(source, label) {
     $('lvl').style.clipPath = 'inset(0 100% 0 0)'; $('fps').textContent = ''; $('lat').textContent = '';
     setStatus(msg, kind); session = null; lastName = null; committed = null; $("live").textContent = "";
     chromaSmooth.fill(0); drawFrame(null, 16000);
-    Object.assign(beatState, { beats: [], segs: [], lastT: 0 }); drawTimeline();
+    Object.assign(beatState, { beats: [], segs: [], lastT: 0, info: null, nextPulse: 0 }); pendingChord = null;
+    audioClock.samples = 0; audioClock.perf = 0; drawTimeline();
     $('bpm').textContent = '–'; $('key').textContent = ''; $('beatrow').classList.remove('locked');
   };
   if (audio[0]) audio[0].onended = () => session && session();
