@@ -1,4 +1,4 @@
-"""Assemble the browser-only site (GitHub Pages): the page, the in-browser engine, onnxruntime-web and
+"""Assemble the Rubato site (GitHub Pages): the page, the in-browser engine, onnxruntime-web and
 a web model bundle. Standard library only, so CI can run it without the training stack.
 
 usage: python scripts/build_site.py --model <web bundle dir> --ort <onnxruntime-web dist dir> --out _site
@@ -26,7 +26,9 @@ html = (WEB / "index.html").read_text(encoding="utf-8")
 (out / "index.html").write_text(html, encoding="utf-8")
 (out / "bench.html").write_text((WEB / "bench.html").read_text(encoding="utf-8"), encoding="utf-8")
 # Cache-busting: browsers (and Pages' 10-minute cache) must never pair a new page with an old engine.
-ver = hashlib.sha1(b"".join((WEB / f).read_bytes() for f in STATIC) + (Path(a.model) / "meta.json").read_bytes()).hexdigest()[:10]
+shipped = [WEB / f for f in STATIC + ["index.html", "bench.html", "manifest.webmanifest", "sw.js"]]
+shipped += sorted((WEB / "icons").iterdir()) + [Path(a.model) / f for f in MODEL]
+ver = hashlib.sha1(b"".join(p.read_bytes() for p in shipped)).hexdigest()[:10]
 for f in STATIC:
     text = (WEB / f).read_text(encoding="utf-8")
     if f == "engine-worker.js":
@@ -43,5 +45,8 @@ for f in ORT:
 if Path(a.model).resolve() != (out / "model").resolve():
     for f in MODEL:
         shutil.copyfile(Path(a.model) / f, out / "model" / f)
+shutil.copytree(WEB / "icons", out / "icons", dirs_exist_ok=True)
+shutil.copyfile(WEB / "manifest.webmanifest", out / "manifest.webmanifest")
+(out / "sw.js").write_text((WEB / "sw.js").read_text(encoding="utf-8").replace("const VERSION = 'dev';", f"const VERSION = '{ver}';"), encoding="utf-8")
 (out / ".nojekyll").write_text("")
 print(f"site -> {out}  ({sum(p.stat().st_size for p in out.rglob('*') if p.is_file()) / 1e6:.1f} MB)")

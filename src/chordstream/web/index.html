@@ -3,7 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>chordstream</title>
+<title>Rubato · live chords</title>
+<meta name="description" content="Rubato listens to music and shows its chords live, in your browser: mic, system audio or a song file. Nothing is uploaded.">
+<meta name="theme-color" content="#151a2e">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta property="og:title" content="Rubato">
+<meta property="og:description" content="Live chords, in your browser.">
+<meta property="og:image" content="https://helloparthshah.github.io/chordstream/icons/og.png">
+<meta name="twitter:card" content="summary_large_image">
 <style>
   :root {
     --bg: #f6f5f2; --panel: #ffffff; --panel-2: #f0eee9; --fg: #1a1917; --muted: #77736b; --line: #e3e0d9;
@@ -159,8 +169,8 @@
 <main>
   <header>
     <div class="brand">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 10v4M8 6v12M12 9v6M16 4v16M20 8v8"/></svg>
-      chordstream
+      <svg width="30" height="30" aria-hidden="true" viewBox="0 0 130.0 130.0"><path d="M12.00 81.00 C34.00 81.00 38.00 41.00 58.00 41.00 C80.00 41.00 78.00 89.00 98.00 89.00 C108.00 89.00 112.00 73.00 118.00 67.00" fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round"/><circle cx="32.03" cy="66.78" r="13" fill="currentColor"/><circle cx="58.00" cy="41.00" r="13" fill="currentColor"/><circle cx="92.02" cy="87.31" r="13" fill="var(--accent-2, #a78bfa)"/></svg>
+      Rubato
     </div>
     <div class="pills">
       <span id="engine" class="pill engine" hidden title="Where the chord model runs"><span class="dot"></span><span id="engtext">Model</span><span class="seg" role="group" aria-label="Run the model on"><button id="useCpu" type="button">CPU</button><button id="useGpu" type="button">GPU</button></span></span>
@@ -345,6 +355,10 @@ function setEngineLive(ms) {
   // Over 40 ms per 40 ms step the engine falls behind real time: show it in red.
   $('engine').classList.toggle('slow', ms != null && ms > 40);
   $('engtext').textContent = ms == null ? engineIdle : `${engineInfo.bundle} · ${ms.toFixed(0)} ms`;
+}
+// Service worker: caches the page, engine and model, so later visits load fast and work offline.
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('sw.js').catch((err) => console.warn('service worker', err));
 }
 addEventListener('DOMContentLoaded', () => {
   $('useCpu').onclick = () => setProvider('wasm');

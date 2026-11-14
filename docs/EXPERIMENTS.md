@@ -1019,6 +1019,16 @@ Dates are the day the experiment ran.
   Mic or Play file.
 - CI runs `tests/web/syntax.mjs` (every inline page script parses) before deploying.
 
+### W04 · Renamed Rubato · 2026-11-14
+- The app is now **Rubato** (rubato: expressive, flexible tempo; the app follows real playing).
+  Logo "Wave": three chord tones riding a stretched line (`scripts/make_icons.py` -> `web/icons/`:
+  SVG, favicon, home-screen and maskable icons, link-preview image). The repo and site address stay
+  `chordstream` for now (renaming the repo to `rubato` would move the site to
+  helloparthshah.github.io/rubato/); the Python package and CLI keep the name `chordstream`. The site is installable (web manifest) and caches the
+  page, engine and model in a service worker, so repeat visits load at once and work offline.
+- Name check (2026-11-14): no chord app called Rubato; nearby is the sequencer "Fugue Machine
+  Rubato" (iOS/macOS, 2025), so a store listing would want "Rubato Chords".
+
 ### W03 · Display decoupled from the engine · 2026-11-14
 - The timeline's "now", the beat pulse and the big-chord updates were driven by engine events, so a
   slow engine (e.g. a busy GPU) stalled the animations, and sheet chords were placed relative to

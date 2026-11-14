@@ -1,7 +1,10 @@
-# chordstream
+<p align="center"><img src="src/chordstream/web/icons/icon-192.png" width="96" alt=""></p>
+
+# Rubato
 
 Real-time chord recognition from live audio, running entirely in the browser:
-**https://helloparthshah.github.io/chordstream/**. Each 40 ms of audio produces one decision, computed
+**https://helloparthshah.github.io/chordstream/**. (The Python package and CLI behind it, which train,
+evaluate and export the model, are still called `chordstream`.) Each 40 ms of audio produces one decision, computed
 only from audio already heard. The live model (v12) names the chord of the audio 120 ms ago: that
 short, trained-in delay lets each decision hear a little of what follows, which removes much of
 the flicker at chord changes. It names 108 chords (12 roots × maj, min, 7, maj7, m7, dim, aug,
